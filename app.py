@@ -6,7 +6,7 @@ app = Flask(__name__)
 
 # IMPORTANT: In production, restrict this to your actual website domain(s)
 # instead of "*", e.g. CORS(app, resources={r"/calculate": {"origins": "https://beltpro.com"}})
-CORS(app, resources={r"/calculate": {"origins": "https://beltpro.com"}})
+CORS(app, resources={r"/calculate": {"origins": "https://www.beltpro.com.br/"}})
 
 
 class SpiralCalculator:
