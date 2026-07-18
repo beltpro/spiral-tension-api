@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Spiral System Tension Estimation | BeltPro</title>
+<style>
+  :root {
+    --navy: #1a3660;
+    --navy-dark: #142c50;
+    --accent-blue: #2d7dd2;
+    --accent-green: #2ecc71;
+    --border: #d7dee6;
+    --bg: #f7f9fb;
+    --text: #2c3e50;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 0;
+  }
+
+  .page-header {
+    text-align: center;
+    padding: 30px 20px 10px;
+  }
+
+  .page-header h1 {
+    color: var(--navy);
+    font-size: 28px;
+    margin-bottom: 4px;
+  }
+
+  .page-header p {
+    color: #5a6b7a;
+    margin-top: 0;
+  }
+
+  .container {
+    max-width: 760px;
+    margin: 20px auto 60px;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    padding: 30px 40px;
+  }
+
+  .section-title {
+    color: var(--navy);
+    border-bottom: 3px solid var(--accent-blue);
+    padding-bottom: 8px;
+    margin-bottom: 24px;
+    font-size: 20px;
+  }
+
+  form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 24px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .field.full-width {
+    grid-column: 1 / -1;
+  }
+
+  label {
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--navy);
+    margin-bottom: 6px;
+  }
+
+  input, select {
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 14px;
+    color: var(--text);
+  }
+
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 2px rgba(45,125,210,0.15);
+  }
+
+  .actions {
+    grid-column: 1 / -1;
+    margin-top: 10px;
+    text-align: center;
+  }
+
+  button {
+    background: var(--navy);
+    color: #fff;
+    border: none;
+    padding: 12px 40px;
+    font-size: 15px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  button:hover {
+    background: var(--navy-dark);
+  }
+
+  button:disabled {
+    background: #9aa7b5;
+    cursor: not-allowed;
+  }
+
+  #results {
+    grid-column: 1 / -1;
+    margin-top: 24px;
+    display: none;
+  }
+
+  #results.show {
+    display: block;
+  }
+
+  .results-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--accent-green);
+    border-radius: 6px;
+    padding: 20px 24px;
+  }
+
+  .results-box h3 {
+    margin-top: 0;
+    color: var(--navy);
+    font-size: 16px;
+  }
+
+  .result-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+  }
+
+  .result-row:last-child {
+    border-bottom: none;
+  }
+
+  .result-label {
+    color: #5a6b7a;
+  }
+
+  .result-value {
+    font-weight: bold;
+    color: var(--navy);
+  }
+
+  .error-box {
+    grid-column: 1 / -1;
+    background: #fdecea;
+    border: 1px solid #f5c6cb;
+    color: #a33;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin-top: 16px;
+    display: none;
+  }
+
+  .error-box.show {
+    display: block;
+  }
+
+  @media (max-width: 640px) {
+    form { grid-template-columns: 1fr; }
+    .container { padding: 24px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>New Spiral System Tension Estimation</h1>
+  <p>Enter your system parameters below to estimate spiral exit tension, belt length, and drive torque.</p>
+</div>
+
+<div class="container">
+  <div class="section-title">System Parameters</div>
+
+  <form id="calc-form">
+    <div class="field">
+      <label for="width">Width / Tension Link (in)</label>
+      <input type="number" step="any" id="width" value="30" required>
+    </div>
+    <div class="field">
+      <label for="belt_weight">Belt Weight (lb/ft)</label>
+      <input type="number" step="any" id="belt_weight" value="4.67" required>
+    </div>
+    <div class="field">
+      <label for="belt_pitch">Belt Pitch (in)</label>
+      <input type="number" step="any" id="belt_pitch" value="1.0" required>
+    </div>
+    <div class="field">
+      <label for="product_weight">Product Weight (lb/ft)</label>
+      <input type="number" step="any" id="product_weight" value="2.53" required>
+    </div>
+    <div class="field">
+      <label for="bed_mu">Bed Friction</label>
+      <input type="number" step="any" id="bed_mu" value="0.30" required>
+    </div>
+    <div class="field">
+      <label for="edge_mu">Edge Friction</label>
+      <input type="number" step="any" id="edge_mu" value="0.10" required>
+    </div>
+    <div class="field">
+      <label for="inside_radius">Inside Radius (in)</label>
+      <input type="number" step="any" id="inside_radius" value="93.5" required>
+    </div>
+    <div class="field">
+      <label for="cage_diameter">Cage Diameter (in)</label>
+      <input type="number" step="any" id="cage_diameter" value="187" required>
+    </div>
+    <div class="field">
+      <label for="tiers">Tiers</label>
+      <input type="number" step="any" id="tiers" value="14" required>
+    </div>
+    <div class="field">
+      <label for="tier_pitch">Tier Pitch (in)</label>
+      <input type="number" step="any" id="tier_pitch" value="7.87" required>
+    </div>
+    <div class="field">
+      <label for="overdrive">Overdrive</label>
+      <input type="number" step="any" id="overdrive" value="2" required>
+    </div>
+    <div class="field">
+      <label for="initial_tension">Initial Tension (lb)</label>
+      <input type="number" step="any" id="initial_tension" value="68.8" required>
+    </div>
+    <div class="field">
+      <label for="sprocket_teeth">Sprocket Teeth</label>
+      <input type="number" step="any" id="sprocket_teeth" value="10" required>
+    </div>
+    <div class="field">
+      <label for="direction">Direction</label>
+      <select id="direction">
+        <option value="Upward" selected>Upward</option>
+        <option value="Downward">Downward</option>
+      </select>
+    </div>
+
+    <div class="actions">
+      <button type="submit" id="calc-btn">Calculate</button>
+    </div>
+
+    <div class="error-box" id="error-box"></div>
+
+    <div id="results">
+      <div class="results-box">
+        <h3>Results</h3>
+        <div class="result-row">
+          <span class="result-label">Spiral Exit Tension</span>
+          <span class="result-value" id="res-tension">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Total Belt Length</span>
+          <span class="result-value" id="res-length">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Drive Torque</span>
+          <span class="result-value" id="res-torque">—</span>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+
+<script>
+  const API_URL = "https://spiral-tension-api.onrender.com/calculate";
+
+  const form = document.getElementById("calc-form");
+  const btn = document.getElementById("calc-btn");
+  const resultsBox = document.getElementById("results");
+  const errorBox = document.getElementById("error-box");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    errorBox.classList.remove("show");
+    errorBox.textContent = "";
+    resultsBox.classList.remove("show");
+
+    const payload = {
+      width: document.getElementById("width").value,
+      belt_weight: document.getElementById("belt_weight").value,
+      belt_pitch: document.getElementById("belt_pitch").value,
+      product_weight: document.getElementById("product_weight").value,
+      bed_mu: document.getElementById("bed_mu").value,
+      edge_mu: document.getElementById("edge_mu").value,
+      inside_radius: document.getElementById("inside_radius").value,
+      cage_diameter: document.getElementById("cage_diameter").value,
+      tiers: document.getElementById("tiers").value,
+      tier_pitch: document.getElementById("tier_pitch").value,
+      overdrive: document.getElementById("overdrive").value,
+      initial_tension: document.getElementById("initial_tension").value,
+      sprocket_teeth: document.getElementById("sprocket_teeth").value,
+      direction: document.getElementById("direction").value,
+    };
+
+    btn.disabled = true;
+    btn.textContent = "Calculating...";
+
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Something went wrong. Please check your inputs.");
+      }
+
+      document.getElementById("res-tension").textContent = data.spiral_exit_tension + " lb";
+      document.getElementById("res-length").textContent = data.total_belt_length + " ft";
+      document.getElementById("res-torque").textContent = data.drive_torque + " lb-in";
+
+      resultsBox.classList.add("show");
+    } catch (err) {
+      errorBox.textContent = err.message || "Unable to reach the calculation service. Please try again shortly.";
+      errorBox.classList.add("show");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Calculate";
+    }
+  });
+</script>
+
+</body>
+</html>
