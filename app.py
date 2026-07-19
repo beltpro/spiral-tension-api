@@ -16,7 +16,14 @@ class SpiralCalculator:
                   tiers, tier_pitch, overdrive, initial_tension,
                   sprocket_teeth, direction):
 
-        q = belt_weight + product_weight
+       q = belt_weight + product_weight
+
+        if overdrive <= bed_mu:
+            raise ValueError(
+                f"Overdrive ({overdrive}) must be greater than Bed Friction ({bed_mu}). "
+                f"Values at or below Bed Friction make the Overdrive Correction formula "
+                f"invalid and produce unrealistic tension results."
+            )
 
         llti = (cage_diameter + 2 * width) * math.pi
         liti = math.sqrt(llti**2 + tier_pitch**2)
