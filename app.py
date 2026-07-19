@@ -4,8 +4,6 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 
-# IMPORTANT: In production, restrict this to your actual website domain(s)
-# instead of "*", e.g. CORS(app, resources={r"/calculate": {"origins": "https://beltpro.com"}})
 CORS(app, resources={r"/calculate": {"origins": "https://www.beltpro.com.br"}})
 
 
@@ -16,7 +14,7 @@ class SpiralCalculator:
                   tiers, tier_pitch, overdrive, initial_tension,
                   sprocket_teeth, direction):
 
-       q = belt_weight + product_weight
+        q = belt_weight + product_weight
 
         if overdrive <= bed_mu:
             raise ValueError(
