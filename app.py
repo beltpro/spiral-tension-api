@@ -4,7 +4,11 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 
-CORS(app, resources={r"/calculate": {"origins": "https://www.beltpro.com.br"}})
+# Keep this restricted to your actual site domain.
+CORS(app, resources={
+    r"/calculate": {"origins": "https://www.beltpro.com.br"},
+    r"/cycles": {"origins": "https://www.beltpro.com.br"},
+})
 
 
 class SpiralCalculator:
@@ -19,7 +23,7 @@ class SpiralCalculator:
         if overdrive <= bed_mu:
             raise ValueError(
                 f"Overdrive ({overdrive}) must be greater than Bed Friction ({bed_mu}). "
-                f"Values at or below Bed Friction are "
+                f"Values at or below Bed Friction make the Overdrive Correction formula "
                 f"invalid and produce unrealistic tension results."
             )
 
@@ -76,6 +80,63 @@ REQUIRED_FIELDS = [
 ]
 
 
+class BeltCyclesCalculator:
+    @staticmethod
+    def calculate(straight_through, infeed_length, outfeed_length, tiers,
+                  belt_width, tension_link, cage_radius, belt_speed,
+                  hours_per_day, days_per_week):
+
+        if tension_link <= 0:
+            raise ValueError("Tension Link Location must be greater than 0.")
+        if belt_speed <= 0:
+            raise ValueError("Belt Speed must be greater than 0.")
+
+        turn_ratio = cage_radius / tension_link
+
+        active_belt_length = infeed_length + outfeed_length + (
+            2 * math.pi * ((tension_link + cage_radius) / 12.0) * tiers
+        )
+
+        dwell_time = active_belt_length / belt_speed
+
+        if dwell_time <= 0:
+            raise ValueError("Calculated dwell time must be greater than 0.")
+
+        if straight_through.strip().lower() == "n":
+            cycles_per_hour = 2 * 60 / dwell_time
+        else:
+            cycles_per_hour = 60 / dwell_time
+
+        cycles_per_day = cycles_per_hour * hours_per_day
+        cycles_per_week = days_per_week * cycles_per_day
+        cycles_per_year = cycles_per_week * 52
+
+        if cycles_per_year <= 0:
+            raise ValueError("Calculated fatigue cycles per year must be greater than 0.")
+
+        years_to_100k = 100000 / cycles_per_year
+        months_to_100k = int(years_to_100k * 12)
+
+        return {
+            "Turn Ratio": turn_ratio,
+            "Active Belt Length": active_belt_length,
+            "Dwell Time": dwell_time,
+            "Fatigue Cycles Per Hour": cycles_per_hour,
+            "Fatigue Cycles Per Day": cycles_per_day,
+            "Fatigue Cycles Per Week": cycles_per_week,
+            "Fatigue Cycles Per Year": cycles_per_year,
+            "Years To 100000 Cycles": years_to_100k,
+            "Months To 100000 Cycles": months_to_100k,
+        }
+
+
+CYCLES_REQUIRED_FIELDS = [
+    "straight_through", "infeed_length", "outfeed_length", "tiers",
+    "belt_width", "tension_link", "cage_radius", "belt_speed",
+    "hours_per_day", "days_per_week",
+]
+
+
 @app.route("/calculate", methods=["POST"])
 def calculate():
     data = request.get_json(silent=True) or {}
@@ -108,6 +169,43 @@ def calculate():
         "spiral_exit_tension": round(result["Spiral Exit Tension"]),
         "total_belt_length": round(result["Total Belt Length"]),
         "drive_torque": round(result["Drive Torque"]),
+    })
+
+
+@app.route("/cycles", methods=["POST"])
+def cycles():
+    data = request.get_json(silent=True) or {}
+
+    missing = [f for f in CYCLES_REQUIRED_FIELDS if f not in data]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+    try:
+        result = BeltCyclesCalculator.calculate(
+            str(data["straight_through"]),
+            float(data["infeed_length"]),
+            float(data["outfeed_length"]),
+            float(data["tiers"]),
+            float(data["belt_width"]),
+            float(data["tension_link"]),
+            float(data["cage_radius"]),
+            float(data["belt_speed"]),
+            float(data["hours_per_day"]),
+            float(data["days_per_week"]),
+        )
+    except (ValueError, TypeError) as ex:
+        return jsonify({"error": f"Invalid input: {ex}"}), 400
+
+    return jsonify({
+        "turn_ratio": round(result["Turn Ratio"], 2),
+        "active_belt_length": round(result["Active Belt Length"]),
+        "dwell_time": round(result["Dwell Time"], 2),
+        "cycles_per_hour": round(result["Fatigue Cycles Per Hour"], 2),
+        "cycles_per_day": round(result["Fatigue Cycles Per Day"]),
+        "cycles_per_week": round(result["Fatigue Cycles Per Week"]),
+        "cycles_per_year": round(result["Fatigue Cycles Per Year"]),
+        "years_to_100000_cycles": round(result["Years To 100000 Cycles"], 1),
+        "months_to_100000_cycles": result["Months To 100000 Cycles"],
     })
 
 
