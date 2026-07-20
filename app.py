@@ -479,6 +479,67 @@ def pitches():
         }), 500
 
 
+@app.route("/max-tension", methods=["GET"])
+def max_tension():
+
+    belt_type = request.args.get("belt_type", "").strip()
+    pitch = request.args.get("pitch", "").strip()
+
+    if not belt_type:
+        return jsonify({
+            "error": "belt_type is required"
+        }), 400
+
+    if not pitch:
+        return jsonify({
+            "error": "pitch is required"
+        }), 400
+
+    try:
+        pitch_value = float(pitch)
+
+        initialize_belt_database()
+
+        connection = get_db_connection()
+
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT allowable_tension
+                FROM belt_allowable_tension
+                WHERE belt_type = %s
+                  AND pitch = %s;
+            """, (belt_type, pitch_value))
+
+            row = cursor.fetchone()
+
+        connection.close()
+
+        if row is None:
+            return jsonify({
+                "error": "No allowable tension found"
+            }), 404
+
+        return jsonify({
+            "belt_type": belt_type,
+            "pitch": pitch_value,
+            "maximum_allowable_tension": row[0],
+            "unit": "lbs"
+        })
+
+    except ValueError:
+
+        return jsonify({
+            "error": "pitch must be numeric"
+        }), 400
+
+    except Exception as ex:
+
+        return jsonify({
+            "error": str(ex)
+        }), 500
+
+
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
