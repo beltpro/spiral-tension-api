@@ -409,6 +409,33 @@ def air_pressure():
         "required_air_pressure": round(result["Required Air Pressure"], 1),
     })
 
+@app.route("/belt-types", methods=["GET"])
+def belt_types():
+
+    try:
+        initialize_belt_database()
+
+        connection = get_db_connection()
+
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT DISTINCT belt_type
+                FROM belt_allowable_tension
+                ORDER BY belt_type;
+            """)
+
+            rows = cursor.fetchall()
+
+        connection.close()
+
+        return jsonify([row[0] for row in rows])
+
+    except Exception as ex:
+
+        return jsonify({
+            "error": str(ex)
+        }), 500
 
 @app.route("/", methods=["GET"])
 def health():
