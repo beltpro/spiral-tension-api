@@ -1,4 +1,8 @@
 import math
+import os
+
+import psycopg2
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -9,6 +13,9 @@ CORS(app, resources={
     r"/calculate": {"origins": "https://www.beltpro.com.br"},
     r"/cycles": {"origins": "https://www.beltpro.com.br"},
     r"/air-pressure": {"origins": "https://www.beltpro.com.br"},
+    r"/belt-types": {"origins": "https://www.beltpro.com.br"},
+    r"/pitches": {"origins": "https://www.beltpro.com.br"},
+    r"/max-tension": {"origins": "https://www.beltpro.com.br"},
 })
 
 
