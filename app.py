@@ -8,6 +8,22 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 
+def get_db_connection():
+    """
+    Opens a PostgreSQL connection using DATABASE_URL.
+
+    This function is ONLY called by the Max Allowable
+    Tension calculator, so if the database is unavailable,
+    the other calculators continue working.
+    """
+
+    database_url = os.environ.get("DATABASE_URL")
+
+    if not database_url:
+        raise RuntimeError("DATABASE_URL environment variable not configured.")
+
+    return psycopg2.connect(database_url)
+
 # Keep this restricted to your actual site domain.
 CORS(app, resources={
     r"/calculate": {"origins": "https://www.beltpro.com.br"},
