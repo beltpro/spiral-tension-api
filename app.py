@@ -24,6 +24,82 @@ def get_db_connection():
 
     return psycopg2.connect(database_url)
 
+BELT_DATA = [
+    ("Omni Grid-Omni Pro-Posidrive", 0.75, 150),
+    ("Omni Grid-Omni Pro-Posidrive", 1.00, 200),
+    ("Omni Grid-Omni Pro-Posidrive", 1.20, 400),
+    ("Omni Grid-Omni Pro-Posidrive", 1.50, 400),
+
+    ("Omni Flex", 1.00, 300),
+    ("Omni Flex", 1.20, 500),
+
+    ("Advantage", 0.75, 150),
+    ("Advantage", 1.20, 200),
+    ("Advantage", 2.00, 300),
+
+    ("Reduced radius Omni Grid", 1.00, 150),
+
+    ("Small radius Omni Grid", 0.75, 150),
+    ("Small radius Omni Grid", 1.00, 150),
+
+    ("Small radius Heavy Duty Omni Grid", 1.50, 400),
+
+    ("Super small radius", 1.00, 150),
+
+    ("Small radius Omni Flex", 1.00, 300),
+
+    ("Space saver", 1.00, 150),
+]
+
+
+def initialize_belt_database():
+    """
+    Creates and populates the allowable-tension table when required.
+
+    This function is called only by the new database routes.
+    It is never called by the existing engineering calculators.
+    """
+
+    connection = None
+
+    try:
+        connection = get_db_connection()
+
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS belt_allowable_tension (
+                    id SERIAL PRIMARY KEY,
+                    belt_type VARCHAR(150) NOT NULL,
+                    pitch NUMERIC(8, 3) NOT NULL,
+                    allowable_tension INTEGER NOT NULL,
+                    UNIQUE (belt_type, pitch)
+                );
+            """)
+
+            cursor.executemany("""
+                INSERT INTO belt_allowable_tension (
+                    belt_type,
+                    pitch,
+                    allowable_tension
+                )
+                VALUES (%s, %s, %s)
+                ON CONFLICT (belt_type, pitch)
+                DO UPDATE SET
+                    allowable_tension = EXCLUDED.allowable_tension;
+            """, BELT_DATA)
+
+        connection.commit()
+
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+
+        raise
+
+    finally:
+        if connection is not None:
+            connection.close()
+
 # Keep this restricted to your actual site domain.
 CORS(app, resources={
     r"/calculate": {"origins": "https://www.beltpro.com.br"},
