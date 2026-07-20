@@ -19,7 +19,7 @@ class SpiralCalculator:
         if overdrive <= bed_mu:
             raise ValueError(
                 f"Overdrive ({overdrive}) must be greater than Bed Friction ({bed_mu}). "
-                f"Values at or below Bed Friction are"
+                f"Values at or below Bed Friction are "
                 f"invalid and produce unrealistic tension results."
             )
 
