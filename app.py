@@ -110,6 +110,7 @@ CORS(app, resources={
     r"/max-tension": {"origins": "https://www.beltpro.com.br"},
     r"/belt-weight-options": {"origins": "https://www.beltpro.com.br"},
     r"/belt-weight-packing": {"origins": "https://www.beltpro.com.br"},
+    r"/stacker-drive-ratio": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -1117,6 +1118,100 @@ def belt_weight_packing():
             {"error": "The server could not complete the calculation."}
         ), 500
 
+
+
+# ==========================================================
+# STACKER OUTFEED DRIVE RATIO CALCULATOR
+# The sprocket search and ranking logic runs only on Render.
+# ==========================================================
+
+class StackerDriveRatioCalculator:
+    @staticmethod
+    def calculate(drive_rpm, belt_rpm, minimum_teeth, maximum_teeth):
+        if not math.isfinite(drive_rpm) or drive_rpm <= 0:
+            raise ValueError("Outfeed drive shaft RPM must be greater than zero.")
+        if not math.isfinite(belt_rpm) or belt_rpm <= 0:
+            raise ValueError("Belt outfeed shaft RPM must be greater than zero.")
+        if int(minimum_teeth) != minimum_teeth or int(maximum_teeth) != maximum_teeth:
+            raise ValueError("Minimum and maximum sprocket tooth counts must be whole numbers.")
+
+        minimum_teeth = int(minimum_teeth)
+        maximum_teeth = int(maximum_teeth)
+
+        if minimum_teeth < 5 or maximum_teeth < 5:
+            raise ValueError("Sprocket tooth counts must be at least 5.")
+        if minimum_teeth > maximum_teeth:
+            raise ValueError("Minimum sprocket teeth cannot be greater than maximum sprocket teeth.")
+        if maximum_teeth > 200:
+            raise ValueError("Maximum sprocket teeth cannot exceed 200.")
+
+        required_ratio = belt_rpm / drive_rpm
+        combinations = []
+
+        for drive_teeth in range(minimum_teeth, maximum_teeth + 1):
+            for driven_teeth in range(minimum_teeth, maximum_teeth + 1):
+                ratio = drive_teeth / driven_teeth
+                predicted_rpm = drive_rpm * ratio
+                rpm_difference = predicted_rpm - belt_rpm
+                speed_error_percent = (rpm_difference / belt_rpm) * 100
+
+                combinations.append({
+                    "drive_teeth": drive_teeth,
+                    "driven_teeth": driven_teeth,
+                    "ratio": ratio,
+                    "predicted_rpm": predicted_rpm,
+                    "rpm_difference": rpm_difference,
+                    "speed_error_percent": speed_error_percent,
+                    "absolute_error": abs(speed_error_percent),
+                })
+
+        combinations.sort(key=lambda item: (
+            item["absolute_error"],
+            item["drive_teeth"] + item["driven_teeth"],
+            item["drive_teeth"],
+        ))
+
+        return {
+            "required_ratio": required_ratio,
+            "combinations": combinations[:10],
+        }
+
+
+@app.route("/stacker-drive-ratio", methods=["POST"])
+def stacker_drive_ratio():
+    data = request.get_json(silent=True) or {}
+    required = ["drive_rpm", "belt_rpm", "minimum_teeth", "maximum_teeth"]
+    missing = [field for field in required if field not in data or data[field] in (None, "")]
+
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+    try:
+        result = StackerDriveRatioCalculator.calculate(
+            float(data["drive_rpm"]),
+            float(data["belt_rpm"]),
+            float(data["minimum_teeth"]),
+            float(data["maximum_teeth"]),
+        )
+
+        return jsonify({
+            "success": True,
+            "required_ratio": round(result["required_ratio"], 10),
+            "combinations": [{
+                "drive_teeth": item["drive_teeth"],
+                "driven_teeth": item["driven_teeth"],
+                "ratio": round(item["ratio"], 10),
+                "predicted_rpm": round(item["predicted_rpm"], 10),
+                "rpm_difference": round(item["rpm_difference"], 10),
+                "speed_error_percent": round(item["speed_error_percent"], 10),
+            } for item in result["combinations"]],
+        })
+
+    except (TypeError, ValueError) as ex:
+        return jsonify({"error": str(ex)}), 400
+    except Exception:
+        app.logger.exception("Stacker drive ratio calculation failed.")
+        return jsonify({"error": "The server could not complete the calculation."}), 500
 
 @app.route("/", methods=["GET"])
 def health():
