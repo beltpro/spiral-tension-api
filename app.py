@@ -114,6 +114,7 @@ CORS(app, resources={
     r"/belt-sprocket-conversion": {"origins": "https://www.beltpro.com.br"},
     r"/oven-band-force": {"origins": "https://www.beltpro.com.br"},
     r"/turn-ratio": {"origins": "https://www.beltpro.com.br"},
+    r"/side-drive-sizing": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -1933,6 +1934,399 @@ def turn_ratio():
     except Exception:
         app.logger.exception(
             "Belt turn ratio calculation failed."
+        )
+        return jsonify({
+            "error": "The server could not complete the calculation."
+        }), 500
+
+
+# ==========================================================
+# SIDE DRIVE SPIRAL DRIVE SIZING CALCULATOR
+# All spiral, return-path, torque, power, drive-count and
+# shaft-sizing calculations run only on Render.
+# ==========================================================
+
+class SideDriveSpiralSizingCalculator:
+    @staticmethod
+    def calculate(
+        direction,
+        production_rate,
+        belt_width,
+        belt_weight,
+        turn_ratio,
+        rail_friction,
+        infeed_length,
+        outfeed_length,
+        tiers,
+        tier_spacing,
+        dwell_time,
+        sprocket_radius,
+        acceleration_time,
+        allowable_tension,
+        take_up_tension,
+        return_length,
+        return_friction,
+        additional_return_resistance,
+        drive_efficiency,
+        service_factor,
+        curve_drag_coefficient,
+        allowable_shaft_shear_stress,
+    ):
+        numeric_values = {
+            "Production rate": production_rate,
+            "Belt width": belt_width,
+            "Belt weight": belt_weight,
+            "Turn ratio": turn_ratio,
+            "Rail friction": rail_friction,
+            "Infeed length": infeed_length,
+            "Outfeed length": outfeed_length,
+            "Number of tiers": tiers,
+            "Tier spacing": tier_spacing,
+            "Dwell time": dwell_time,
+            "Sprocket radius": sprocket_radius,
+            "Acceleration time": acceleration_time,
+            "Allowable belt tension": allowable_tension,
+            "Take-up tension": take_up_tension,
+            "Return length": return_length,
+            "Return friction": return_friction,
+            "Additional return resistance": additional_return_resistance,
+            "Drive efficiency": drive_efficiency,
+            "Service factor": service_factor,
+            "Curve-drag coefficient": curve_drag_coefficient,
+            "Allowable shaft shear stress": allowable_shaft_shear_stress,
+        }
+
+        for label, value in numeric_values.items():
+            if not math.isfinite(value):
+                raise ValueError(f"{label} must be a valid number.")
+
+        if direction not in {"up", "down"}:
+            raise ValueError("Running direction must be 'up' or 'down'.")
+
+        positive_values = {
+            "Production rate": production_rate,
+            "Belt width": belt_width,
+            "Belt weight": belt_weight,
+            "Turn ratio": turn_ratio,
+            "Rail friction": rail_friction,
+            "Number of tiers": tiers,
+            "Tier spacing": tier_spacing,
+            "Dwell time": dwell_time,
+            "Sprocket radius": sprocket_radius,
+            "Acceleration time": acceleration_time,
+            "Allowable belt tension": allowable_tension,
+            "Drive efficiency": drive_efficiency,
+            "Service factor": service_factor,
+            "Allowable shaft shear stress": allowable_shaft_shear_stress,
+        }
+
+        for label, value in positive_values.items():
+            if value <= 0:
+                raise ValueError(f"{label} must be greater than zero.")
+
+        if int(tiers) != tiers:
+            raise ValueError("Number of tiers must be a whole number.")
+
+        tiers = int(tiers)
+
+        if drive_efficiency > 1:
+            raise ValueError("Drive efficiency must be between 0 and 1.")
+
+        nonnegative_values = {
+            "Infeed length": infeed_length,
+            "Outfeed length": outfeed_length,
+            "Take-up tension": take_up_tension,
+            "Return length": return_length,
+            "Return friction": return_friction,
+            "Additional return resistance": additional_return_resistance,
+            "Curve-drag coefficient": curve_drag_coefficient,
+        }
+
+        for label, value in nonnegative_values.items():
+            if value < 0:
+                raise ValueError(f"{label} cannot be negative.")
+
+        g = 9.81
+
+        inside_radius = turn_ratio * belt_width
+        mean_radius = inside_radius + belt_width / 2
+        circumference_per_tier = (
+            inside_radius * 2 + belt_width * 2
+        ) * math.pi
+
+        helix_length = circumference_per_tier * tiers
+
+        belt_length_infeed_to_outfeed = (
+            helix_length + infeed_length + outfeed_length
+        )
+
+        if belt_length_infeed_to_outfeed <= 0:
+            raise ValueError(
+                "Calculated belt length from infeed to outfeed must be greater than zero."
+            )
+
+        product_mass_on_belt = (
+            production_rate * dwell_time / 60
+        )
+
+        product_weight_per_meter = (
+            product_mass_on_belt / belt_length_infeed_to_outfeed
+        )
+
+        moving_mass_per_meter = (
+            belt_weight + product_weight_per_meter
+        )
+
+        belt_speed_m_per_min = (
+            belt_length_infeed_to_outfeed / dwell_time
+        )
+
+        belt_speed_m_per_sec = belt_speed_m_per_min / 60
+
+        helix_angle = math.atan(
+            tier_spacing / (2 * math.pi * mean_radius)
+        )
+
+        friction_force = (
+            rail_friction
+            * moving_mass_per_meter
+            * circumference_per_tier
+            * g
+        )
+
+        vertical_lift_magnitude = (
+            moving_mass_per_meter
+            * circumference_per_tier
+            * g
+            * math.sin(helix_angle)
+        )
+
+        signed_vertical_force = (
+            -vertical_lift_magnitude
+            if direction == "down"
+            else vertical_lift_magnitude
+        )
+
+        curve_drag_force = (
+            moving_mass_per_meter
+            * circumference_per_tier
+            * g
+            * curve_drag_coefficient
+        )
+
+        acceleration_force = (
+            moving_mass_per_meter
+            * circumference_per_tier
+            * belt_speed_m_per_sec
+            / acceleration_time
+        )
+
+        # Each tier is driven. The force generated in one tier therefore
+        # does not accumulate into the next tier.
+        spiral_force_per_tier = max(
+            0.0,
+            friction_force
+            + signed_vertical_force
+            + curve_drag_force
+            + acceleration_force,
+        )
+
+        # The return belt is assumed empty and level.
+        return_friction_force = (
+            return_friction
+            * belt_weight
+            * g
+            * return_length
+        )
+
+        entry_tension = (
+            take_up_tension
+            + return_friction_force
+            + additional_return_resistance
+        )
+
+        # Return-path tension acts only on the first tier.
+        # Tension is reset near zero after each driven sprocket.
+        first_tier_tension = (
+            entry_tension + spiral_force_per_tier
+        )
+
+        subsequent_tier_tension = spiral_force_per_tier
+
+        maximum_tier_tension = max(
+            first_tier_tension,
+            subsequent_tier_tension,
+        )
+
+        drive_count = max(
+            1,
+            math.ceil(maximum_tier_tension / allowable_tension),
+        )
+
+        tension_per_drive_location = (
+            maximum_tier_tension / drive_count
+        )
+
+        tension_utilization_percent = (
+            tension_per_drive_location
+            / allowable_tension
+            * 100
+        )
+
+        total_running_force_across_all_tiers = (
+            first_tier_tension
+            + subsequent_tier_tension * max(0, tiers - 1)
+        )
+
+        total_sprocket_torque = (
+            total_running_force_across_all_tiers
+            * sprocket_radius
+        )
+
+        running_torque_per_drive_shaft = (
+            total_sprocket_torque / drive_count
+        )
+
+        design_torque_per_drive_shaft = (
+            running_torque_per_drive_shaft
+            * service_factor
+        )
+
+        sprocket_circumference = (
+            2 * math.pi * sprocket_radius
+        )
+
+        sprocket_rpm = (
+            belt_speed_m_per_min / sprocket_circumference
+        )
+
+        angular_speed = sprocket_rpm * 2 * math.pi / 60
+
+        power_per_drive_kw = (
+            design_torque_per_drive_shaft
+            * angular_speed
+            / drive_efficiency
+            / 1000
+        )
+
+        shaft_diameter_mm = (
+            16
+            * design_torque_per_drive_shaft
+            * 1000
+            / (
+                math.pi
+                * allowable_shaft_shear_stress
+            )
+        ) ** (1 / 3)
+
+        return {
+            "drive_count": drive_count,
+            "design_torque_per_drive_nm": design_torque_per_drive_shaft,
+            "power_per_drive_kw": power_per_drive_kw,
+            "sprocket_rpm": sprocket_rpm,
+            "minimum_shaft_diameter_mm": shaft_diameter_mm,
+            "maximum_tier_tension_n": maximum_tier_tension,
+            "tension_per_drive_location_n": tension_per_drive_location,
+            "tension_utilization_percent": tension_utilization_percent,
+            "entry_tension_n": entry_tension,
+            "return_friction_force_n": return_friction_force,
+            "spiral_force_per_tier_n": spiral_force_per_tier,
+            "first_tier_tension_n": first_tier_tension,
+            "subsequent_tier_tension_n": subsequent_tier_tension,
+            "belt_speed_m_per_min": belt_speed_m_per_min,
+        }
+
+
+@app.route("/side-drive-sizing", methods=["POST"])
+def side_drive_sizing():
+    data = request.get_json(silent=True) or {}
+
+    required_fields = [
+        "direction",
+        "production_rate",
+        "belt_width",
+        "belt_weight",
+        "turn_ratio",
+        "rail_friction",
+        "infeed_length",
+        "outfeed_length",
+        "tiers",
+        "tier_spacing",
+        "dwell_time",
+        "sprocket_radius",
+        "acceleration_time",
+        "allowable_tension",
+        "take_up_tension",
+        "return_length",
+        "return_friction",
+        "additional_return_resistance",
+        "drive_efficiency",
+        "service_factor",
+        "curve_drag_coefficient",
+        "allowable_shaft_shear_stress",
+    ]
+
+    missing = [
+        field
+        for field in required_fields
+        if field not in data or data[field] in (None, "")
+    ]
+
+    if missing:
+        return jsonify({
+            "error": f"Missing fields: {', '.join(missing)}"
+        }), 400
+
+    try:
+        result = SideDriveSpiralSizingCalculator.calculate(
+            direction=str(data["direction"]).strip().lower(),
+            production_rate=float(data["production_rate"]),
+            belt_width=float(data["belt_width"]),
+            belt_weight=float(data["belt_weight"]),
+            turn_ratio=float(data["turn_ratio"]),
+            rail_friction=float(data["rail_friction"]),
+            infeed_length=float(data["infeed_length"]),
+            outfeed_length=float(data["outfeed_length"]),
+            tiers=float(data["tiers"]),
+            tier_spacing=float(data["tier_spacing"]),
+            dwell_time=float(data["dwell_time"]),
+            sprocket_radius=float(data["sprocket_radius"]),
+            acceleration_time=float(data["acceleration_time"]),
+            allowable_tension=float(data["allowable_tension"]),
+            take_up_tension=float(data["take_up_tension"]),
+            return_length=float(data["return_length"]),
+            return_friction=float(data["return_friction"]),
+            additional_return_resistance=float(
+                data["additional_return_resistance"]
+            ),
+            drive_efficiency=float(data["drive_efficiency"]),
+            service_factor=float(data["service_factor"]),
+            curve_drag_coefficient=float(
+                data["curve_drag_coefficient"]
+            ),
+            allowable_shaft_shear_stress=float(
+                data["allowable_shaft_shear_stress"]
+            ),
+        )
+
+        return jsonify({
+            "success": True,
+            **{
+                key: (
+                    value
+                    if isinstance(value, int)
+                    else round(value, 10)
+                )
+                for key, value in result.items()
+            },
+        })
+
+    except (TypeError, ValueError) as ex:
+        return jsonify({"error": str(ex)}), 400
+
+    except Exception:
+        app.logger.exception(
+            "Side drive spiral sizing calculation failed."
         )
         return jsonify({
             "error": "The server could not complete the calculation."
