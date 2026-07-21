@@ -113,6 +113,7 @@ CORS(app, resources={
     r"/stacker-drive-ratio": {"origins": "https://www.beltpro.com.br"},
     r"/belt-sprocket-conversion": {"origins": "https://www.beltpro.com.br"},
     r"/oven-band-force": {"origins": "https://www.beltpro.com.br"},
+    r"/turn-ratio": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -1858,6 +1859,80 @@ def oven_band_force():
     except Exception:
         app.logger.exception(
             "Oven band force calculation failed."
+        )
+        return jsonify({
+            "error": "The server could not complete the calculation."
+        }), 500
+
+
+
+# ==========================================================
+# BELT TURN RATIO CALCULATOR
+# The engineering formula runs only on Render.
+# The website sends only the two pitch inputs and receives
+# the calculated turn ratio.
+# ==========================================================
+
+class BeltTurnRatioCalculator:
+    @staticmethod
+    def calculate(extended_pitch, compressed_pitch):
+        if not math.isfinite(extended_pitch) or extended_pitch <= 0:
+            raise ValueError("Extended pitch must be greater than zero.")
+
+        if not math.isfinite(compressed_pitch) or compressed_pitch <= 0:
+            raise ValueError("Compressed pitch must be greater than zero.")
+
+        if compressed_pitch >= extended_pitch:
+            raise ValueError(
+                "Compressed pitch must be smaller than extended pitch."
+            )
+
+        turn_ratio = compressed_pitch / (
+            extended_pitch - compressed_pitch
+        )
+
+        if not math.isfinite(turn_ratio) or turn_ratio <= 0:
+            raise ValueError(
+                "The entered pitches did not produce a valid turn ratio."
+            )
+
+        return turn_ratio
+
+
+@app.route("/turn-ratio", methods=["POST"])
+def turn_ratio():
+    data = request.get_json(silent=True) or {}
+
+    required_fields = ["extended_pitch", "compressed_pitch"]
+
+    missing = [
+        field
+        for field in required_fields
+        if field not in data or data[field] in (None, "")
+    ]
+
+    if missing:
+        return jsonify({
+            "error": f"Missing fields: {', '.join(missing)}"
+        }), 400
+
+    try:
+        result = BeltTurnRatioCalculator.calculate(
+            extended_pitch=float(data["extended_pitch"]),
+            compressed_pitch=float(data["compressed_pitch"]),
+        )
+
+        return jsonify({
+            "success": True,
+            "turn_ratio": round(result, 4),
+        })
+
+    except (TypeError, ValueError) as ex:
+        return jsonify({"error": str(ex)}), 400
+
+    except Exception:
+        app.logger.exception(
+            "Belt turn ratio calculation failed."
         )
         return jsonify({
             "error": "The server could not complete the calculation."
