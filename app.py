@@ -112,6 +112,7 @@ CORS(app, resources={
     r"/belt-weight-packing": {"origins": "https://www.beltpro.com.br"},
     r"/stacker-drive-ratio": {"origins": "https://www.beltpro.com.br"},
     r"/belt-sprocket-conversion": {"origins": "https://www.beltpro.com.br"},
+    r"/oven-band-force": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -1588,6 +1589,275 @@ def belt_sprocket_conversion():
     except Exception:
         app.logger.exception(
             "Belt sprocket conversion calculation failed."
+        )
+        return jsonify({
+            "error": "The server could not complete the calculation."
+        }), 500
+
+
+# ==========================================================
+# OVEN BAND CYLINDER FORCE CALCULATOR
+# All force, unit-conversion, utilization, and margin logic
+# runs only on Render.
+# ==========================================================
+
+class OvenBandForceCalculator:
+    LBF_TO_N = 4.4482216153
+    IN_TO_MM = 25.4
+    BAR_TO_PA = 100000.0
+    PSI_TO_PA = 6894.757293168
+
+    @staticmethod
+    def calculate(
+        unit_system,
+        num_cylinders,
+        bore_diameter,
+        rod_diameter,
+        pressure,
+        pressure_unit,
+        stroke_direction,
+        efficiency_percent,
+        mechanical_ratio,
+        band_strength,
+    ):
+        if unit_system not in {"imperial", "metric"}:
+            raise ValueError("Invalid unit system.")
+
+        if (
+            num_cylinders < 1
+            or int(num_cylinders) != num_cylinders
+        ):
+            raise ValueError(
+                "Enter a whole number of cylinders greater than zero."
+            )
+
+        if not math.isfinite(bore_diameter) or bore_diameter <= 0:
+            raise ValueError(
+                "Cylinder bore diameter must be greater than zero."
+            )
+
+        if not math.isfinite(rod_diameter) or rod_diameter < 0:
+            raise ValueError("Rod diameter cannot be negative.")
+
+        if stroke_direction not in {"extension", "retraction"}:
+            raise ValueError("Invalid force direction.")
+
+        if (
+            stroke_direction == "retraction"
+            and rod_diameter >= bore_diameter
+        ):
+            raise ValueError(
+                "Rod diameter must be smaller than the cylinder bore diameter."
+            )
+
+        if not math.isfinite(pressure) or pressure < 0:
+            raise ValueError("Pressure cannot be negative.")
+
+        if pressure_unit not in {"bar", "psi"}:
+            raise ValueError("Invalid pressure unit.")
+
+        if (
+            not math.isfinite(efficiency_percent)
+            or efficiency_percent <= 0
+            or efficiency_percent > 100
+        ):
+            raise ValueError(
+                "Efficiency must be between 1% and 100%."
+            )
+
+        if (
+            not math.isfinite(mechanical_ratio)
+            or mechanical_ratio <= 0
+        ):
+            raise ValueError(
+                "Mechanical ratio must be greater than zero."
+            )
+
+        if band_strength is not None and (
+            not math.isfinite(band_strength)
+            or band_strength <= 0
+        ):
+            raise ValueError(
+                "Band strength must be greater than zero."
+            )
+
+        bore_mm = (
+            bore_diameter
+            if unit_system == "metric"
+            else bore_diameter * OvenBandForceCalculator.IN_TO_MM
+        )
+        rod_mm = (
+            rod_diameter
+            if unit_system == "metric"
+            else rod_diameter * OvenBandForceCalculator.IN_TO_MM
+        )
+
+        pressure_pa = (
+            pressure * OvenBandForceCalculator.BAR_TO_PA
+            if pressure_unit == "bar"
+            else pressure * OvenBandForceCalculator.PSI_TO_PA
+        )
+
+        piston_area_mm2 = math.pi * bore_mm ** 2 / 4
+        rod_area_mm2 = math.pi * rod_mm ** 2 / 4
+
+        effective_area_mm2 = (
+            piston_area_mm2
+            if stroke_direction == "extension"
+            else piston_area_mm2 - rod_area_mm2
+        )
+
+        theoretical_force_n = (
+            pressure_pa * effective_area_mm2 / 1_000_000
+        )
+
+        efficiency = efficiency_percent / 100
+        adjusted_force_n = theoretical_force_n * efficiency
+
+        total_force_n = (
+            adjusted_force_n
+            * int(num_cylinders)
+            * mechanical_ratio
+        )
+
+        band_tension_n = total_force_n / 2
+
+        comparison = None
+
+        if band_strength is not None:
+            band_strength_n = (
+                band_strength
+                if unit_system == "metric"
+                else band_strength * OvenBandForceCalculator.LBF_TO_N
+            )
+
+            utilization_percent = (
+                band_tension_n / band_strength_n
+            ) * 100
+
+            margin_n = band_strength_n - band_tension_n
+
+            if utilization_percent <= 80:
+                status = "safe"
+                message = (
+                    "Calculated band tension is within the entered "
+                    "band strength."
+                )
+            elif utilization_percent <= 100:
+                status = "warning"
+                message = (
+                    "Caution: calculated band tension is close to "
+                    "the entered band strength."
+                )
+            else:
+                status = "danger"
+                message = (
+                    "Warning: calculated band tension exceeds the "
+                    "entered band strength."
+                )
+
+            comparison = {
+                "status": status,
+                "message": message,
+                "utilization_percent": utilization_percent,
+                "margin_n": margin_n,
+                "margin_lbf": (
+                    margin_n / OvenBandForceCalculator.LBF_TO_N
+                ),
+            }
+
+        return {
+            "piston_area_mm2": piston_area_mm2,
+            "effective_area_mm2": effective_area_mm2,
+            "theoretical_force_n": theoretical_force_n,
+            "adjusted_force_n": adjusted_force_n,
+            "total_force_n": total_force_n,
+            "band_tension_n": band_tension_n,
+            "comparison": comparison,
+        }
+
+
+@app.route("/oven-band-force", methods=["POST"])
+def oven_band_force():
+    data = request.get_json(silent=True) or {}
+
+    required_fields = [
+        "unit_system",
+        "num_cylinders",
+        "bore_diameter",
+        "rod_diameter",
+        "pressure",
+        "pressure_unit",
+        "stroke_direction",
+        "efficiency_percent",
+        "mechanical_ratio",
+    ]
+
+    missing = [
+        field for field in required_fields
+        if field not in data or data[field] in (None, "")
+    ]
+
+    if missing:
+        return jsonify({
+            "error": f"Missing fields: {', '.join(missing)}"
+        }), 400
+
+    try:
+        band_strength_raw = data.get("band_strength")
+
+        band_strength = (
+            None
+            if band_strength_raw in (None, "")
+            else float(band_strength_raw)
+        )
+
+        result = OvenBandForceCalculator.calculate(
+            unit_system=str(data["unit_system"]).strip(),
+            num_cylinders=float(data["num_cylinders"]),
+            bore_diameter=float(data["bore_diameter"]),
+            rod_diameter=float(data["rod_diameter"]),
+            pressure=float(data["pressure"]),
+            pressure_unit=str(data["pressure_unit"]).strip(),
+            stroke_direction=str(
+                data["stroke_direction"]
+            ).strip(),
+            efficiency_percent=float(
+                data["efficiency_percent"]
+            ),
+            mechanical_ratio=float(data["mechanical_ratio"]),
+            band_strength=band_strength,
+        )
+
+        return jsonify({
+            "success": True,
+            "piston_area_mm2": round(
+                result["piston_area_mm2"], 10
+            ),
+            "effective_area_mm2": round(
+                result["effective_area_mm2"], 10
+            ),
+            "theoretical_force_n": round(
+                result["theoretical_force_n"], 10
+            ),
+            "adjusted_force_n": round(
+                result["adjusted_force_n"], 10
+            ),
+            "total_force_n": round(
+                result["total_force_n"], 10
+            ),
+            "band_tension_n": round(
+                result["band_tension_n"], 10
+            ),
+            "comparison": result["comparison"],
+        })
+
+    except (TypeError, ValueError) as ex:
+        return jsonify({"error": str(ex)}), 400
+
+    except Exception:
+        app.logger.exception(
+            "Oven band force calculation failed."
         )
         return jsonify({
             "error": "The server could not complete the calculation."
