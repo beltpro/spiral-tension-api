@@ -111,6 +111,7 @@ CORS(app, resources={
     r"/belt-weight-options": {"origins": "https://www.beltpro.com.br"},
     r"/belt-weight-packing": {"origins": "https://www.beltpro.com.br"},
     r"/stacker-drive-ratio": {"origins": "https://www.beltpro.com.br"},
+    r"/belt-sprocket-conversion": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -1212,6 +1213,385 @@ def stacker_drive_ratio():
     except Exception:
         app.logger.exception("Stacker drive ratio calculation failed.")
         return jsonify({"error": "The server could not complete the calculation."}), 500
+
+
+# ==========================================================
+# BELT SPROCKET CONVERSION CALCULATOR
+# All conversion and drive-correction formulas run on Render.
+# ==========================================================
+
+class BeltSprocketConversionCalculator:
+    @staticmethod
+    def to_inches(value, unit):
+        if unit == "in":
+            return value
+        if unit == "mm":
+            return value / 25.4
+        raise ValueError("Pitch unit must be 'in' or 'mm'.")
+
+    @staticmethod
+    def from_inches(value, unit):
+        if unit == "in":
+            return value
+        if unit == "mm":
+            return value * 25.4
+        raise ValueError("Display unit must be 'in' or 'mm'.")
+
+    @staticmethod
+    def calculate(existing_pitch, existing_pitch_unit, existing_teeth,
+                  new_pitch, new_pitch_unit, existing_speed,
+                  speed_unit, tolerance, compare_range):
+
+        if existing_pitch <= 0 or new_pitch <= 0:
+            raise ValueError("Belt pitches must be greater than zero.")
+
+        if existing_teeth <= 0 or int(existing_teeth) != existing_teeth:
+            raise ValueError(
+                "Existing sprocket teeth must be a positive whole number."
+            )
+
+        if existing_speed is not None and (
+            not math.isfinite(existing_speed) or existing_speed < 0
+        ):
+            raise ValueError(
+                "Existing belt speed must be zero or greater."
+            )
+
+        if speed_unit not in {"ft/min", "m/min"}:
+            raise ValueError("Invalid belt speed unit.")
+
+        tolerance = max(0.0, tolerance)
+        compare_range = min(5, max(1, int(round(compare_range))))
+        existing_teeth = int(existing_teeth)
+
+        existing_pitch_inches = (
+            BeltSprocketConversionCalculator.to_inches(
+                existing_pitch, existing_pitch_unit
+            )
+        )
+        new_pitch_inches = (
+            BeltSprocketConversionCalculator.to_inches(
+                new_pitch, new_pitch_unit
+            )
+        )
+
+        original_travel_inches = (
+            existing_pitch_inches * existing_teeth
+        )
+        ideal_teeth = original_travel_inches / new_pitch_inches
+        recommended_teeth = max(1, round(ideal_teeth))
+        new_travel_inches = new_pitch_inches * recommended_teeth
+        relative_speed = new_travel_inches / original_travel_inches
+        speed_error_percent = (relative_speed - 1) * 100
+
+        display_unit = (
+            existing_pitch_unit
+            if existing_pitch_unit == new_pitch_unit
+            else "in"
+        )
+
+        original_travel_display = (
+            BeltSprocketConversionCalculator.from_inches(
+                original_travel_inches, display_unit
+            )
+        )
+        new_travel_display = (
+            BeltSprocketConversionCalculator.from_inches(
+                new_travel_inches, display_unit
+            )
+        )
+
+        resulting_speed = None
+        if existing_speed is not None and existing_speed > 0:
+            resulting_speed = existing_speed * relative_speed
+
+        minimum_teeth = max(
+            1, math.floor(ideal_teeth) - compare_range
+        )
+        maximum_teeth = (
+            math.ceil(ideal_teeth) + compare_range
+        )
+
+        comparisons = []
+
+        for teeth in range(minimum_teeth, maximum_teeth + 1):
+            travel_inches = new_pitch_inches * teeth
+            ratio = travel_inches / original_travel_inches
+            error_percent = (ratio - 1) * 100
+            travel_display = (
+                BeltSprocketConversionCalculator.from_inches(
+                    travel_inches, display_unit
+                )
+            )
+
+            if teeth == recommended_teeth:
+                evaluation = "Recommended"
+            elif abs(error_percent) <= tolerance:
+                evaluation = "Within tolerance"
+            else:
+                evaluation = "Outside tolerance"
+
+            comparisons.append({
+                "teeth": teeth,
+                "travel_per_revolution": travel_display,
+                "relative_speed_percent": ratio * 100,
+                "speed_error_percent": error_percent,
+                "evaluation": evaluation,
+                "recommended": teeth == recommended_teeth,
+            })
+
+        return {
+            "original_travel": original_travel_display,
+            "ideal_teeth": ideal_teeth,
+            "recommended_teeth": recommended_teeth,
+            "new_travel": new_travel_display,
+            "relative_speed_percent": relative_speed * 100,
+            "resulting_speed": resulting_speed,
+            "speed_error_percent": speed_error_percent,
+            "within_tolerance": abs(speed_error_percent) <= tolerance,
+            "display_unit": display_unit,
+            "speed_unit": speed_unit,
+            "comparisons": comparisons,
+        }
+
+    @staticmethod
+    def correction(existing_pitch, existing_pitch_unit, existing_teeth,
+                   new_pitch, new_pitch_unit, selected_teeth,
+                   method, method_inputs):
+
+        if existing_pitch <= 0 or new_pitch <= 0:
+            raise ValueError("Belt pitches must be greater than zero.")
+
+        if existing_teeth <= 0 or int(existing_teeth) != existing_teeth:
+            raise ValueError(
+                "Existing sprocket teeth must be a positive whole number."
+            )
+
+        if selected_teeth <= 0 or int(selected_teeth) != selected_teeth:
+            raise ValueError(
+                "Selected belt sprocket teeth must be a positive whole number."
+            )
+
+        existing_pitch_inches = (
+            BeltSprocketConversionCalculator.to_inches(
+                existing_pitch, existing_pitch_unit
+            )
+        )
+        new_pitch_inches = (
+            BeltSprocketConversionCalculator.to_inches(
+                new_pitch, new_pitch_unit
+            )
+        )
+
+        original_travel_inches = (
+            existing_pitch_inches * int(existing_teeth)
+        )
+        selected_travel_inches = (
+            new_pitch_inches * int(selected_teeth)
+        )
+
+        correction_factor = (
+            original_travel_inches / selected_travel_inches
+        )
+        selected_relative_speed = (
+            selected_travel_inches / original_travel_inches
+        )
+        selected_error_percent = (
+            selected_relative_speed - 1
+        ) * 100
+
+        result = {
+            "method": method,
+            "correction_factor": correction_factor,
+            "selected_error_percent": selected_error_percent,
+        }
+
+        if method == "chain":
+            driver_teeth = float(
+                method_inputs.get("driver_teeth", 0)
+            )
+            driven_teeth = float(
+                method_inputs.get("driven_teeth", 0)
+            )
+
+            if (
+                driver_teeth <= 0 or driven_teeth <= 0
+                or int(driver_teeth) != driver_teeth
+                or int(driven_teeth) != driven_teeth
+            ):
+                raise ValueError(
+                    "Chain sprocket teeth must be positive whole numbers."
+                )
+
+            driver_teeth = int(driver_teeth)
+            driven_teeth = int(driven_teeth)
+
+            current_ratio = driver_teeth / driven_teeth
+            required_ratio = current_ratio * correction_factor
+
+            theoretical_driver = required_ratio * driven_teeth
+            recommended_driver = max(1, round(theoretical_driver))
+            achieved_ratio_option_1 = (
+                recommended_driver / driven_teeth
+            )
+            final_ratio_option_1 = (
+                selected_relative_speed
+                * (achieved_ratio_option_1 / current_ratio)
+            )
+            final_error_option_1 = (
+                final_ratio_option_1 - 1
+            ) * 100
+
+            theoretical_driven = driver_teeth / required_ratio
+            recommended_driven = max(1, round(theoretical_driven))
+            achieved_ratio_option_2 = (
+                driver_teeth / recommended_driven
+            )
+            final_ratio_option_2 = (
+                selected_relative_speed
+                * (achieved_ratio_option_2 / current_ratio)
+            )
+            final_error_option_2 = (
+                final_ratio_option_2 - 1
+            ) * 100
+
+            result.update({
+                "current_ratio": current_ratio,
+                "required_ratio": required_ratio,
+                "driver_teeth": driver_teeth,
+                "driven_teeth": driven_teeth,
+                "theoretical_driver": theoretical_driver,
+                "recommended_driver": recommended_driver,
+                "final_error_option_1": final_error_option_1,
+                "theoretical_driven": theoretical_driven,
+                "recommended_driven": recommended_driven,
+                "final_error_option_2": final_error_option_2,
+            })
+
+        elif method == "pulley":
+            driver_diameter = float(
+                method_inputs.get("driver_diameter", 0)
+            )
+            driven_diameter = float(
+                method_inputs.get("driven_diameter", 0)
+            )
+
+            if driver_diameter <= 0 or driven_diameter <= 0:
+                raise ValueError(
+                    "Pulley diameters must be positive values."
+                )
+
+            current_ratio = driver_diameter / driven_diameter
+            required_ratio = current_ratio * correction_factor
+
+            result.update({
+                "current_ratio": current_ratio,
+                "required_ratio": required_ratio,
+                "required_driver": required_ratio * driven_diameter,
+                "required_driven": driver_diameter / required_ratio,
+            })
+
+        elif method == "gearbox":
+            gearbox_ratio = float(
+                method_inputs.get("gearbox_ratio", 0)
+            )
+
+            if gearbox_ratio <= 0:
+                raise ValueError(
+                    "Gearbox reduction ratio must be positive."
+                )
+
+            result["required_gearbox_ratio"] = (
+                gearbox_ratio / correction_factor
+            )
+
+        elif method == "vfd":
+            current_frequency = float(
+                method_inputs.get("current_frequency", 0)
+            )
+
+            if current_frequency <= 0:
+                raise ValueError(
+                    "VFD frequency must be positive."
+                )
+
+            result["required_frequency"] = (
+                current_frequency * correction_factor
+            )
+
+        else:
+            raise ValueError("Invalid correction method.")
+
+        return result
+
+
+@app.route("/belt-sprocket-conversion", methods=["POST"])
+def belt_sprocket_conversion():
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action", "calculate")).strip().lower()
+
+    try:
+        existing_speed_raw = data.get("existing_speed")
+        existing_speed = (
+            None
+            if existing_speed_raw in (None, "")
+            else float(existing_speed_raw)
+        )
+
+        common = {
+            "existing_pitch": float(data.get("existing_pitch", 0)),
+            "existing_pitch_unit": str(
+                data.get("existing_pitch_unit", "")
+            ).strip(),
+            "existing_teeth": float(data.get("existing_teeth", 0)),
+            "new_pitch": float(data.get("new_pitch", 0)),
+            "new_pitch_unit": str(
+                data.get("new_pitch_unit", "")
+            ).strip(),
+        }
+
+        if action == "calculate":
+            result = BeltSprocketConversionCalculator.calculate(
+                **common,
+                existing_speed=existing_speed,
+                speed_unit=str(
+                    data.get("speed_unit", "ft/min")
+                ).strip(),
+                tolerance=float(data.get("tolerance", 0)),
+                compare_range=float(data.get("compare_range", 2)),
+            )
+
+        elif action == "correction":
+            result = BeltSprocketConversionCalculator.correction(
+                **common,
+                selected_teeth=float(
+                    data.get("selected_teeth", 0)
+                ),
+                method=str(
+                    data.get("method", "")
+                ).strip().lower(),
+                method_inputs=data.get("method_inputs") or {},
+            )
+
+        else:
+            raise ValueError("Invalid calculation action.")
+
+        return jsonify({
+            "success": True,
+            "action": action,
+            "result": result,
+        })
+
+    except (TypeError, ValueError) as ex:
+        return jsonify({"error": str(ex)}), 400
+
+    except Exception:
+        app.logger.exception(
+            "Belt sprocket conversion calculation failed."
+        )
+        return jsonify({
+            "error": "The server could not complete the calculation."
+        }), 500
 
 @app.route("/", methods=["GET"])
 def health():
