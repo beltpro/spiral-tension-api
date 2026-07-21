@@ -108,6 +108,8 @@ CORS(app, resources={
     r"/belt-types": {"origins": "https://www.beltpro.com.br"},
     r"/pitches": {"origins": "https://www.beltpro.com.br"},
     r"/max-tension": {"origins": "https://www.beltpro.com.br"},
+    r"/belt-weight-options": {"origins": "https://www.beltpro.com.br"},
+    r"/belt-weight-packing": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -538,6 +540,582 @@ def max_tension():
         return jsonify({
             "error": str(ex)
         }), 500
+
+
+
+# ==========================================================
+# BELT WEIGHT & PACKING CALCULATOR
+# The engineering tables and formulas below run only on Render.
+# ==========================================================
+
+LBFT_TO_KGM = 1.4881639436
+LB_TO_KG = 0.45359237
+IN_TO_MM = 25.4
+FT_TO_M = 0.3048
+
+PACKING = {
+    "pipe_diameter_in": 1.43,
+    "belt_thickness_in": 0.50,
+    "plywood_weight_lb_ft2": 2.85,
+    "standard_roll_length_ft": 50,
+    "maximum_box_length_in": 99,
+    "packing_clearance_in": 6,
+}
+
+MESH_075 = {
+    "none": ("No mesh", 0, 0),
+    "12-16-17": ("12-16-17", 0.34, 0.03),
+    "12-16-16": ("12-16-16", 0.45, 0.032),
+    "18-16-17": ("18-16-17", 0.48, 0.03),
+    "18-16-16": ("18-16-16", 0.65, 0.032),
+    "24-16-17": ("24-16-17", 0.63, 0.03),
+    "24-16-16": ("24-16-16", 0.85, 0.032),
+    "30-16-17": ("30-16-17", 0.78, 0.03),
+    "30-16-16": ("30-16-16", 1.05, 0.032),
+    "36-16-17": ("36-16-17", 0.93, 0.03),
+    "36-16-16": ("36-16-16", 1.26, 0.032),
+    "42-16-17": ("42-16-17", 1.08, 0.03),
+    "42-16-16": ("42-16-16", 1.47, 0.032),
+    "48-16-17": ("48-16-17", 1.24, 0.03),
+    "48-16-16": ("48-16-16", 1.67, 0.032),
+    "54-16-17": ("54-16-17", 1.39, 0.03),
+    "54-16-16": ("54-16-16", 1.88, 0.032),
+}
+
+MESH_100 = {
+    "none": ("No mesh", 0, 0),
+    "12-12-17": ("B12-12-17", 0.31, 0.02),
+    "12-12-16": ("B12-12-16", 0.39, 0.028),
+    "18-12-17": ("B18-12-17", 0.46, 0.02),
+    "18-12-16": ("B18-12-16", 0.57, 0.028),
+    "24-12-17": ("B24-12-17", 0.60, 0.02),
+    "24-12-16": ("B24-12-16", 0.76, 0.028),
+    "30-12-17": ("B30-12-17", 0.75, 0.02),
+    "30-12-16": ("B30-12-16", 0.94, 0.028),
+    "36-12-17": ("B36-12-17", 0.90, 0.02),
+    "36-12-16": ("B36-12-16", 1.12, 0.028),
+    "42-12-17": ("B42-12-17", 1.05, 0.02),
+    "42-12-16": ("B42-12-16", 1.31, 0.028),
+    "48-12-17": ("B48-12-17", 1.20, 0.02),
+    "48-12-16": ("B48-12-16", 1.49, 0.028),
+    "54-12-17": ("B54-12-17", 1.34, 0.02),
+    "54-12-16": ("B54-12-16", 1.68, 0.028),
+}
+
+MESH_120 = {
+    "none": ("No mesh", 0, 0),
+    "18-10-17": ("18-10-17", 0.42, 0.02),
+    "18-10-16": ("18-10-16", 0.57, 0.02),
+    "24-10-17": ("24-10-17", 0.56, 0.02),
+    "24-10-16": ("24-10-16", 0.75, 0.02),
+    "30-10-17": ("30-10-17", 0.69, 0.02),
+    "30-10-16": ("30-10-16", 0.93, 0.02),
+    "36-10-17": ("36-10-17", 0.83, 0.02),
+    "36-10-16": ("36-10-16", 1.12, 0.02),
+    "42-10-17": ("42-10-17", 0.97, 0.02),
+    "42-10-16": ("42-10-16", 1.30, 0.02),
+    "48-10-17": ("48-10-17", 1.10, 0.02),
+    "48-10-16": ("48-10-16", 1.49, 0.02),
+    "54-10-17": ("54-10-17", 1.24, 0.02),
+    "54-10-16": ("54-10-16", 1.67, 0.02),
+}
+
+MESH_150 = {
+    "none": ("No mesh", 0, 0),
+    "18-8-16": ("18-8-16", 0.53, 0),
+    "24-8-16": ("24-8-16", 0.69, 0),
+    "30-8-16": ("30-8-16", 0.86, 0),
+    "36-8-16": ("36-8-16", 1.03, 0),
+    "36-8-17": ("36-8-17", 0.78, 0),
+    "42-8-16": ("42-8-16", 1.20, 0),
+    "42-8-17": ("42-8-17", 0.91, 0),
+    "48-8-16": ("48-8-16", 1.37, 0),
+    "48-8-17": ("48-8-17", 1.03, 0),
+    "54-8-16": ("54-8-16", 1.54, 0),
+    "54-8-17": ("54-8-17", 1.16, 0),
+}
+
+OG150_BASE_TABLE = [
+    (12, 2.30), (14, 2.49), (16, 2.69), (18, 2.88), (20, 3.08),
+    (22, 3.28), (24, 3.47), (26, 3.67), (28, 3.86), (30, 4.06),
+    (32, 4.26), (34, 4.45), (36, 4.65), (38, 4.84), (40, 5.04),
+    (42, 5.24), (44, 5.43), (46, 5.63), (48, 5.82), (50, 6.02),
+    (52, 6.22), (54, 6.41), (56, 6.61), (58, 6.80), (60, 7.00),
+]
+
+BELT_WEIGHT_DEFINITIONS = {
+    "ofe1": {"mesh": None, "thickness_in": 0.50, "minimum_width": 6},
+    "ofe2": {"mesh": None, "thickness_in": 0.50, "minimum_width": 6},
+    "og075": {"mesh": MESH_075, "thickness_in": 0.4375, "minimum_width": 6},
+    "og100": {"mesh": MESH_100, "thickness_in": 0.50, "minimum_width": 6},
+    "og120": {"mesh": MESH_120, "thickness_in": 0.625, "minimum_width": 6},
+    "og150": {
+        "mesh": MESH_150,
+        "thickness_in": 0.625,
+        "minimum_width": 12,
+        "maximum_width": 60,
+    },
+    "srog075": {
+        "mesh": MESH_075,
+        "thickness_in": 0.4375,
+        "minimum_width": 8,
+        "center_link": True,
+    },
+}
+
+
+def interpolate_table(table, width):
+    if width < table[0][0] or width > table[-1][0]:
+        raise ValueError(
+            "The 1.5-inch Omni-Grid width must be between 12 and 60 inches."
+        )
+
+    for index, row in enumerate(table):
+        if width == row[0]:
+            return row[1]
+
+        if width < row[0]:
+            width1, weight1 = table[index - 1]
+            width2, weight2 = row
+            return weight1 + ((width - width1) / (width2 - width1)) * (
+                weight2 - weight1
+            )
+
+    return table[-1][1]
+
+
+def belt_weight_per_foot(belt_type, width_in, mesh_key, center_link_in):
+    definition = BELT_WEIGHT_DEFINITIONS[belt_type]
+    mesh_table = definition.get("mesh")
+    mesh = mesh_table.get(mesh_key) if mesh_table else None
+
+    if mesh_table and mesh is None:
+        raise ValueError("Invalid mesh selection.")
+
+    mesh_weight = mesh[1] if mesh else 0
+    allowance = mesh[2] if mesh else 0
+
+    if belt_type == "ofe1":
+        return (((width_in - 0.97) / 12) * 3.10) + 0.04
+
+    if belt_type == "ofe2":
+        return (((width_in - 0.97) / 12) * 3.35) + 0.04
+
+    if belt_type == "og075":
+        base = (0.008396 * width_in * 16) + (0.021 * 32) + 0.04
+        overlay = mesh_weight * max(0, width_in - 2.224) / 12
+        return base + overlay + allowance
+
+    if belt_type == "og100":
+        base = (0.008396 * width_in * 11.1) + (0.0348 * 22.2)
+        overlay = mesh_weight * max(0, width_in - 2.5) / 12
+        return base + overlay + allowance + (0.04 if mesh_weight > 0 else 0)
+
+    if belt_type == "og120":
+        base = (0.009759 * width_in * 10) + (0.0785 * 20) + 0.054
+        overlay = mesh_weight * max(0, width_in - 3) / 12
+        return base + overlay + allowance
+
+    if belt_type == "og150":
+        base = interpolate_table(OG150_BASE_TABLE, width_in)
+        conveying_surface_ft = max(0, width_in - 2.75) / 12
+        return base + mesh_weight * conveying_surface_ft
+
+    if belt_type == "srog075":
+        usable_center = max(0, min(center_link_in, width_in - 1.668))
+        base = (
+            (0.008396 * width_in * 16)
+            + (0.021 * 16)
+            + (0.027 * 16)
+            + (0.0348 * 16)
+            + 0.04
+        )
+        center_mesh = mesh_weight * max(0, usable_center - 1.668) / 12
+        outer_mesh = (
+            mesh_weight
+            * (16 / 12)
+            * max(0, width_in - usable_center - 1.668)
+            / 12
+        )
+        return (
+            base
+            + center_mesh
+            + outer_mesh
+            + (allowance + 0.04 if mesh_weight > 0 else 0)
+        )
+
+    raise ValueError("Unsupported belt type.")
+
+
+def excel_ceiling(value, significance=1):
+    if not math.isfinite(value):
+        return 0
+    return math.ceil(value / significance) * significance
+
+
+def excel_floor(value, significance=1):
+    if not math.isfinite(value):
+        return 0
+    return math.floor(value / significance) * significance
+
+
+def build_diameter_table(belt_thickness_in):
+    table = []
+    diameter = PACKING["pipe_diameter_in"] + 2 * belt_thickness_in
+    accumulated_length = 0
+
+    for _ in range(34):
+        accumulated_length += math.pi * (diameter - belt_thickness_in) / 12
+        diameter += 1
+        table.append(
+            {"footage": accumulated_length, "diameter_in": diameter}
+        )
+
+    return table
+
+
+def diameter_lookup(table, footage):
+    if not math.isfinite(footage) or footage <= 0:
+        return 0
+
+    selected = table[0]["diameter_in"]
+
+    for row in table:
+        if row["footage"] <= footage:
+            selected = row["diameter_in"]
+        else:
+            break
+
+    return selected
+
+
+def calculate_crate_weight(length_in, width_in, height_in):
+    top_bottom = excel_ceiling(length_in * width_in * 2 / 144, 1)
+    short_sides = excel_ceiling(width_in * height_in * 2 / 144, 1)
+    long_sides = excel_ceiling(length_in * height_in * 2 / 144, 1)
+    total_square_feet = top_bottom + short_sides + long_sides
+
+    return {
+        "total_square_feet": total_square_feet,
+        "tare_lb": total_square_feet * PACKING["plywood_weight_lb_ft2"],
+    }
+
+
+def calculate_packing(width_in, length_ft, belt_thickness_in):
+    diameter_table = build_diameter_table(belt_thickness_in)
+    standard_roll_diameter = diameter_lookup(
+        diameter_table, PACKING["standard_roll_length_ft"]
+    )
+
+    if length_ft <= 100:
+        rolls_across = 1
+    elif length_ft <= 200:
+        rolls_across = 2
+    else:
+        rolls_across = 2 if width_in * 3 > 89 else 3
+
+    rolls_allowed_by_box_length = excel_floor(
+        PACKING["maximum_box_length_in"] / width_in, 1
+    )
+    rolls_across = min(rolls_across, max(1, rolls_allowed_by_box_length))
+
+    footage_per_main_box = rolls_across * 100
+    simple_main_box_count = excel_floor(length_ft / footage_per_main_box, 1)
+    unrounded_remainder = (
+        length_ft - simple_main_box_count * footage_per_main_box
+    )
+    remainder_ratio = abs(unrounded_remainder) / footage_per_main_box
+
+    calculated_main_box_count = simple_main_box_count + (
+        1 if remainder_ratio >= 0.5 else 0
+    )
+
+    excess_check = calculated_main_box_count * footage_per_main_box > length_ft
+
+    if excess_check:
+        main_boxes_before_adjustment = calculated_main_box_count
+    else:
+        main_boxes_before_adjustment = (
+            calculated_main_box_count - 1
+            if calculated_main_box_count * footage_per_main_box - length_ft > 0
+            else calculated_main_box_count
+        )
+
+    actual_leftover = (
+        0
+        if excess_check
+        else length_ft
+        - main_boxes_before_adjustment * footage_per_main_box
+    )
+
+    leftover_roll_count = actual_leftover / PACKING["standard_roll_length_ft"]
+    rounded_leftover_roll_count = (
+        excel_ceiling(leftover_roll_count, 1)
+        if leftover_roll_count > 1
+        else 0
+    )
+
+    main_box_quantity = main_boxes_before_adjustment
+
+    if (
+        rounded_leftover_roll_count > 2
+        and rounded_leftover_roll_count < 5
+        and rolls_across == 2
+    ):
+        main_box_quantity += 1
+        actual_leftover = 0
+    elif rounded_leftover_roll_count > 4 and rolls_across == 3:
+        main_box_quantity += 1
+        actual_leftover = 0
+
+    box_types = []
+
+    if main_box_quantity > 0:
+        main_length_in = (
+            rolls_across * width_in + PACKING["packing_clearance_in"]
+        )
+
+        main_width_in = (
+            excel_ceiling(
+                standard_roll_diameter + PACKING["packing_clearance_in"], 1
+            )
+            if length_ft == 50
+            else excel_ceiling(
+                2 * standard_roll_diameter + PACKING["packing_clearance_in"],
+                1,
+            )
+        )
+
+        main_height_in = excel_ceiling(
+            standard_roll_diameter + PACKING["packing_clearance_in"], 1
+        )
+
+        crate = calculate_crate_weight(
+            main_length_in, main_width_in, main_height_in
+        )
+
+        box_types.append(
+            {
+                "quantity": main_box_quantity,
+                "length_in": main_length_in,
+                "width_in": main_width_in,
+                "height_in": main_height_in,
+                "tare_each_lb": crate["tare_lb"],
+                "footage_per_box_ft": length_ft / main_box_quantity,
+            }
+        )
+
+    remaining_rolls = actual_leftover / PACKING["standard_roll_length_ft"]
+
+    if remaining_rolls > 0 and remaining_rolls < 3:
+        if remaining_rolls <= 1:
+            roll_count = excel_ceiling(remaining_rolls, 1)
+            roll_length_ft = actual_leftover / roll_count
+            roll_diameter_in = diameter_lookup(diameter_table, roll_length_ft)
+            second_length_in = (
+                roll_count * width_in + PACKING["packing_clearance_in"]
+            )
+            second_width_in = excel_ceiling(
+                roll_diameter_in + PACKING["packing_clearance_in"], 1
+            )
+            second_height_in = second_width_in
+        else:
+            calculated_rolls_across = (
+                1
+                if actual_leftover <= 100
+                else 2
+                if actual_leftover <= 200
+                else 3
+            )
+            maximum_rolls_across = excel_floor(
+                PACKING["maximum_box_length_in"] / width_in, 1
+            )
+            actual_rolls_across = min(
+                calculated_rolls_across, max(1, maximum_rolls_across)
+            )
+            second_length_in = (
+                actual_rolls_across * width_in
+                + PACKING["packing_clearance_in"]
+            )
+            second_width_in = (
+                excel_ceiling(
+                    standard_roll_diameter
+                    + PACKING["packing_clearance_in"],
+                    1,
+                )
+                if actual_leftover <= 50
+                else excel_ceiling(
+                    2 * standard_roll_diameter
+                    + PACKING["packing_clearance_in"],
+                    1,
+                )
+            )
+            second_height_in = excel_ceiling(
+                standard_roll_diameter + PACKING["packing_clearance_in"], 1
+            )
+
+        crate = calculate_crate_weight(
+            second_length_in, second_width_in, second_height_in
+        )
+
+        box_types.append(
+            {
+                "quantity": 1,
+                "length_in": second_length_in,
+                "width_in": second_width_in,
+                "height_in": second_height_in,
+                "tare_each_lb": crate["tare_lb"],
+                "footage_per_box_ft": actual_leftover,
+            }
+        )
+
+    total_quantity = sum(box["quantity"] for box in box_types)
+    total_tare_lb = sum(
+        box["quantity"] * box["tare_each_lb"] for box in box_types
+    )
+
+    return {
+        "quantity": total_quantity,
+        "total_tare_lb": total_tare_lb,
+        "box_types": box_types,
+    }
+
+
+@app.route("/belt-weight-options", methods=["GET"])
+def belt_weight_options():
+    belt_type = request.args.get("belt_type", "").strip()
+
+    if belt_type not in BELT_WEIGHT_DEFINITIONS:
+        return jsonify({"error": "Invalid belt type."}), 400
+
+    definition = BELT_WEIGHT_DEFINITIONS[belt_type]
+    mesh_table = definition.get("mesh")
+
+    return jsonify(
+        {
+            "meshes": (
+                [
+                    {"value": key, "label": values[0]}
+                    for key, values in mesh_table.items()
+                ]
+                if mesh_table
+                else []
+            ),
+            "center_link": bool(definition.get("center_link")),
+        }
+    )
+
+
+@app.route("/belt-weight-packing", methods=["POST"])
+def belt_weight_packing():
+    data = request.get_json(silent=True) or {}
+
+    try:
+        belt_type = str(data.get("belt_type", "")).strip()
+        width = float(data.get("width", 0))
+        length = float(data.get("length", 0))
+        width_unit = str(data.get("width_unit", "in")).strip()
+        length_unit = str(data.get("length_unit", "ft")).strip()
+        mesh_key = str(data.get("mesh", "none")).strip() or "none"
+        center_link = float(data.get("center_link", 0) or 0)
+        center_link_unit = str(
+            data.get("center_link_unit", "in")
+        ).strip()
+
+        if belt_type not in BELT_WEIGHT_DEFINITIONS:
+            raise ValueError("Please select a valid belt type.")
+
+        if not math.isfinite(width) or width <= 0:
+            raise ValueError("Please enter a valid belt width.")
+
+        if not math.isfinite(length) or length <= 0:
+            raise ValueError("Please enter a valid belt length.")
+
+        if width_unit not in {"in", "mm"}:
+            raise ValueError("Invalid width unit.")
+
+        if length_unit not in {"ft", "m"}:
+            raise ValueError("Invalid length unit.")
+
+        if center_link_unit not in {"in", "mm"}:
+            raise ValueError("Invalid center-link unit.")
+
+        width_in = width / IN_TO_MM if width_unit == "mm" else width
+        length_ft = length / FT_TO_M if length_unit == "m" else length
+        center_link_in = (
+            center_link / IN_TO_MM
+            if center_link_unit == "mm"
+            else center_link
+        )
+
+        definition = BELT_WEIGHT_DEFINITIONS[belt_type]
+
+        if width_in < definition["minimum_width"]:
+            raise ValueError(
+                f"The selected belt requires a width of at least "
+                f"{definition['minimum_width']} inches."
+            )
+
+        maximum_width = definition.get("maximum_width")
+        if maximum_width and width_in > maximum_width:
+            raise ValueError(
+                f"The selected belt supports widths up to "
+                f"{maximum_width} inches in this calculator."
+            )
+
+        if definition.get("center_link") and center_link_in >= width_in:
+            raise ValueError(
+                "Center-link coverage must be smaller than the overall "
+                "belt width."
+            )
+
+        weight_lb_ft = belt_weight_per_foot(
+            belt_type, width_in, mesh_key, center_link_in
+        )
+
+        if not math.isfinite(weight_lb_ft) or weight_lb_ft <= 0:
+            raise ValueError(
+                "The selected values did not produce a valid belt weight."
+            )
+
+        weight_kg_m = weight_lb_ft * LBFT_TO_KGM
+        total_net_lb = weight_lb_ft * length_ft
+        workbook_net_belt_lb = excel_ceiling(total_net_lb, 1)
+
+        packing = calculate_packing(
+            width_in, length_ft, definition["thickness_in"]
+        )
+
+        gross_lb = workbook_net_belt_lb + packing["total_tare_lb"]
+
+        return jsonify(
+            {
+                "success": True,
+                "weight_lb_ft": round(weight_lb_ft, 8),
+                "weight_kg_m": round(weight_kg_m, 8),
+                "net_weight_lb": workbook_net_belt_lb,
+                "net_weight_kg": math.ceil(
+                    workbook_net_belt_lb / 2.204622476
+                ),
+                "box_quantity": packing["quantity"],
+                "box_weight_lb": round(packing["total_tare_lb"], 8),
+                "box_weight_kg": round(
+                    packing["total_tare_lb"] * LB_TO_KG, 8
+                ),
+                "gross_weight_lb": round(gross_lb, 8),
+                "gross_weight_kg": math.ceil(gross_lb / 2.204622476),
+                "box_types": packing["box_types"],
+            }
+        )
+
+    except (TypeError, ValueError) as ex:
+        return jsonify({"error": str(ex)}), 400
+
+    except Exception:
+        app.logger.exception("Belt weight and packing calculation failed.")
+        return jsonify(
+            {"error": "The server could not complete the calculation."}
+        ), 500
 
 
 @app.route("/", methods=["GET"])
