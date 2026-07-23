@@ -896,17 +896,20 @@ def calculate_packing(width_in, length_ft, belt_thickness_in):
         )
 
         crate = calculate_crate_weight(
-            main_length_in, main_width_in, main_height_in
-        )
+    main_length_in, main_width_in, main_height_in
+)
 
-        box_types.append(
+main_footage_total = length_ft - actual_leftover
+main_footage_per_box = main_footage_total / main_box_quantity
+
+box_types.append(
             {
                 "quantity": main_box_quantity,
                 "length_in": main_length_in,
                 "width_in": main_width_in,
                 "height_in": main_height_in,
                 "tare_each_lb": crate["tare_lb"],
-                "footage_per_box_ft": length_ft / main_box_quantity,
+                "footage_per_box_ft": main_footage_per_box,
             }
         )
 
@@ -973,7 +976,17 @@ def calculate_packing(width_in, length_ft, belt_thickness_in):
                 "footage_per_box_ft": actual_leftover,
             }
         )
+packed_footage = sum(
+    box["quantity"] * box["footage_per_box_ft"]
+    for box in box_types
+)
 
+if abs(packed_footage - length_ft) > 0.01:
+    raise ValueError(
+        f"Packing footage mismatch: boxes contain "
+        f"{packed_footage:.2f} ft, but the belt length is "
+        f"{length_ft:.2f} ft."
+    )
     total_quantity = sum(box["quantity"] for box in box_types)
     total_tare_lb = sum(
         box["quantity"] * box["tare_each_lb"] for box in box_types
