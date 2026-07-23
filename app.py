@@ -2042,6 +2042,29 @@ class BeltTurnRatioCalculator:
 
 @app.route("/turn-ratio", methods=["POST"])
 def turn_ratio():
+    # This route is the first calculator endpoint protected by the
+    # BELTPRO access-token system. Other calculator routes remain
+    # unchanged until they are migrated and tested one by one.
+    token = extract_bearer_token()
+
+    try:
+        validate_calculator_token(token)
+    except SignatureExpired:
+        return jsonify({
+            "error": "Calculator access has expired.",
+            "access_expired": True,
+        }), 401
+    except BadSignature:
+        return jsonify({
+            "error": "Valid calculator access is required.",
+            "access_required": True,
+        }), 401
+    except RuntimeError as ex:
+        app.logger.error(str(ex))
+        return jsonify({
+            "error": "Calculator access is not configured on the server."
+        }), 500
+
     data = request.get_json(silent=True) or {}
 
     required_fields = ["extended_pitch", "compressed_pitch"]
