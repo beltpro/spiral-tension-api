@@ -1,12 +1,10 @@
 import math
 import os
-import hmac
 
 import psycopg2
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 app = Flask(__name__)
 
@@ -117,145 +115,7 @@ CORS(app, resources={
     r"/oven-band-force": {"origins": "https://www.beltpro.com.br"},
     r"/turn-ratio": {"origins": "https://www.beltpro.com.br"},
     r"/side-drive-sizing": {"origins": "https://www.beltpro.com.br"},
-    r"/calculator-login": {"origins": "https://www.beltpro.com.br"},
-    r"/verify-token": {"origins": "https://www.beltpro.com.br"},
 })
-
-
-# ==========================================================
-# CALCULATOR ACCESS AUTHENTICATION
-# Access code and signing secret are stored only in Render.
-# ==========================================================
-
-CALCULATOR_TOKEN_MAX_AGE = 30 * 24 * 60 * 60  # 30 days, in seconds
-CALCULATOR_TOKEN_SALT = "beltpro-calculator-access-v1"
-DISCLAIMER_VERSION = "2026-07-23-v1"
-
-
-def get_calculator_serializer():
-    secret = os.environ.get("CALCULATOR_TOKEN_SECRET", "").strip()
-
-    if not secret:
-        raise RuntimeError(
-            "CALCULATOR_TOKEN_SECRET environment variable is not configured."
-        )
-
-    return URLSafeTimedSerializer(secret_key=secret, salt=CALCULATOR_TOKEN_SALT)
-
-
-def create_calculator_token():
-    serializer = get_calculator_serializer()
-
-    return serializer.dumps({
-        "access": "calculators",
-        "disclaimer_accepted": True,
-        "disclaimer_version": DISCLAIMER_VERSION,
-    })
-
-
-def validate_calculator_token(token):
-    if not token:
-        raise BadSignature("Missing token.")
-
-    serializer = get_calculator_serializer()
-    payload = serializer.loads(
-        token,
-        max_age=CALCULATOR_TOKEN_MAX_AGE,
-    )
-
-    if payload.get("access") != "calculators":
-        raise BadSignature("Invalid token scope.")
-
-    if payload.get("disclaimer_accepted") is not True:
-        raise BadSignature("Disclaimer was not accepted.")
-
-    if payload.get("disclaimer_version") != DISCLAIMER_VERSION:
-        raise BadSignature("Disclaimer acceptance is outdated.")
-
-    return payload
-
-
-def extract_bearer_token():
-    authorization = request.headers.get("Authorization", "").strip()
-
-    if not authorization.lower().startswith("bearer "):
-        return ""
-
-    return authorization[7:].strip()
-
-
-@app.route("/calculator-login", methods=["POST"])
-def calculator_login():
-    data = request.get_json(silent=True) or {}
-
-    submitted_code = str(data.get("access_code", "")).strip()
-    disclaimer_accepted = data.get("disclaimer_accepted") is True
-    configured_code = os.environ.get("CALCULATOR_ACCESS_CODE", "").strip()
-
-    if not configured_code:
-        app.logger.error(
-            "CALCULATOR_ACCESS_CODE environment variable is not configured."
-        )
-        return jsonify({
-            "error": "Calculator access is not configured on the server."
-        }), 500
-
-    if not submitted_code:
-        return jsonify({"error": "Access code is required."}), 400
-
-    if not hmac.compare_digest(submitted_code, configured_code):
-        return jsonify({"error": "Invalid access code."}), 401
-
-    if not disclaimer_accepted:
-        return jsonify({
-            "error": "You must accept the engineering disclaimer.",
-            "disclaimer_required": True,
-            "disclaimer_version": DISCLAIMER_VERSION,
-        }), 400
-
-    try:
-        token = create_calculator_token()
-    except RuntimeError as ex:
-        app.logger.error(str(ex))
-        return jsonify({
-            "error": "Calculator access is not configured on the server."
-        }), 500
-
-    return jsonify({
-        "success": True,
-        "token": token,
-        "expires_in_seconds": CALCULATOR_TOKEN_MAX_AGE,
-        "disclaimer_version": DISCLAIMER_VERSION,
-    })
-
-
-@app.route("/verify-token", methods=["POST"])
-def verify_token():
-    token = extract_bearer_token()
-
-    try:
-        validate_calculator_token(token)
-    except SignatureExpired:
-        return jsonify({
-            "valid": False,
-            "error": "Access token has expired."
-        }), 401
-    except BadSignature:
-        return jsonify({
-            "valid": False,
-            "error": "Invalid access token."
-        }), 401
-    except RuntimeError as ex:
-        app.logger.error(str(ex))
-        return jsonify({
-            "valid": False,
-            "error": "Calculator access is not configured on the server."
-        }), 500
-
-    return jsonify({
-        "valid": True,
-        "disclaimer_version": DISCLAIMER_VERSION,
-    })
 
 
 class SpiralCalculator:
@@ -2042,29 +1902,6 @@ class BeltTurnRatioCalculator:
 
 @app.route("/turn-ratio", methods=["POST"])
 def turn_ratio():
-    # This route is the first calculator endpoint protected by the
-    # BELTPRO access-token system. Other calculator routes remain
-    # unchanged until they are migrated and tested one by one.
-    token = extract_bearer_token()
-
-    try:
-        validate_calculator_token(token)
-    except SignatureExpired:
-        return jsonify({
-            "error": "Calculator access has expired.",
-            "access_expired": True,
-        }), 401
-    except BadSignature:
-        return jsonify({
-            "error": "Valid calculator access is required.",
-            "access_required": True,
-        }), 401
-    except RuntimeError as ex:
-        app.logger.error(str(ex))
-        return jsonify({
-            "error": "Calculator access is not configured on the server."
-        }), 500
-
     data = request.get_json(silent=True) or {}
 
     required_fields = ["extended_pitch", "compressed_pitch"]
