@@ -26,29 +26,29 @@ def get_db_connection():
 
 BELT_DATA = [
     ("Omni Grid-Omni Pro-Posidrive", 0.75, 150),
-    ("Omni Grid-Omni Pro-Posidrive", 1.00, 200),
+    ("Omni Grid-Omni Pro-Posidrive", 1.08, 200),
     ("Omni Grid-Omni Pro-Posidrive", 1.20, 400),
     ("Omni Grid-Omni Pro-Posidrive", 1.50, 400),
 
-    ("Omni Flex", 1.00, 300),
+    ("Omni Flex", 1.08, 300),
     ("Omni Flex", 1.20, 500),
 
     ("Advantage", 0.75, 150),
     ("Advantage", 1.20, 200),
     ("Advantage", 2.00, 300),
 
-    ("Reduced radius Omni Grid", 1.00, 150),
+    ("Reduced radius Omni Grid", 1.08, 150),
 
     ("Small radius Omni Grid", 0.75, 150),
-    ("Small radius Omni Grid", 1.00, 150),
+    ("Small radius Omni Grid", 1.08, 150),
 
     ("Small radius Heavy Duty Omni Grid", 1.50, 400),
 
-    ("Super small radius", 1.00, 150),
+    ("Super small radius", 1.08, 150),
 
-    ("Small radius Omni Flex", 1.00, 300),
+    ("Small radius Omni Flex", 1.08, 300),
 
-    ("Space saver", 1.00, 150),
+    ("Space saver", 1.08, 150),
 ]
 
 
