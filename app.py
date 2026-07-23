@@ -808,8 +808,10 @@ def calculate_crate_weight(length_in, width_in, height_in):
 
 def calculate_packing(width_in, length_ft, belt_thickness_in):
     diameter_table = build_diameter_table(belt_thickness_in)
+
     standard_roll_diameter = diameter_lookup(
-        diameter_table, PACKING["standard_roll_length_ft"]
+        diameter_table,
+        PACKING["standard_roll_length_ft"],
     )
 
     if length_ft <= 100:
@@ -820,29 +822,48 @@ def calculate_packing(width_in, length_ft, belt_thickness_in):
         rolls_across = 2 if width_in * 3 > 89 else 3
 
     rolls_allowed_by_box_length = excel_floor(
-        PACKING["maximum_box_length_in"] / width_in, 1
+        PACKING["maximum_box_length_in"] / width_in,
+        1,
     )
-    rolls_across = min(rolls_across, max(1, rolls_allowed_by_box_length))
+
+    rolls_across = min(
+        rolls_across,
+        max(1, rolls_allowed_by_box_length),
+    )
 
     footage_per_main_box = rolls_across * 100
-    simple_main_box_count = excel_floor(length_ft / footage_per_main_box, 1)
-    unrounded_remainder = (
-        length_ft - simple_main_box_count * footage_per_main_box
+
+    simple_main_box_count = excel_floor(
+        length_ft / footage_per_main_box,
+        1,
     )
-    remainder_ratio = abs(unrounded_remainder) / footage_per_main_box
+
+    unrounded_remainder = (
+        length_ft
+        - simple_main_box_count * footage_per_main_box
+    )
+
+    remainder_ratio = (
+        abs(unrounded_remainder) / footage_per_main_box
+    )
 
     calculated_main_box_count = simple_main_box_count + (
         1 if remainder_ratio >= 0.5 else 0
     )
 
-    excess_check = calculated_main_box_count * footage_per_main_box > length_ft
+    excess_check = (
+        calculated_main_box_count * footage_per_main_box
+        > length_ft
+    )
 
     if excess_check:
         main_boxes_before_adjustment = calculated_main_box_count
     else:
         main_boxes_before_adjustment = (
             calculated_main_box_count - 1
-            if calculated_main_box_count * footage_per_main_box - length_ft > 0
+            if calculated_main_box_count * footage_per_main_box
+            - length_ft
+            > 0
             else calculated_main_box_count
         )
 
@@ -853,7 +874,11 @@ def calculate_packing(width_in, length_ft, belt_thickness_in):
         - main_boxes_before_adjustment * footage_per_main_box
     )
 
-    leftover_roll_count = actual_leftover / PACKING["standard_roll_length_ft"]
+    leftover_roll_count = (
+        actual_leftover
+        / PACKING["standard_roll_length_ft"]
+    )
+
     rounded_leftover_roll_count = (
         excel_ceiling(leftover_roll_count, 1)
         if leftover_roll_count > 1
@@ -869,7 +894,11 @@ def calculate_packing(width_in, length_ft, belt_thickness_in):
     ):
         main_box_quantity += 1
         actual_leftover = 0
-    elif rounded_leftover_roll_count > 4 and rolls_across == 3:
+
+    elif (
+        rounded_leftover_roll_count > 4
+        and rolls_across == 3
+    ):
         main_box_quantity += 1
         actual_leftover = 0
 
@@ -877,32 +906,43 @@ def calculate_packing(width_in, length_ft, belt_thickness_in):
 
     if main_box_quantity > 0:
         main_length_in = (
-            rolls_across * width_in + PACKING["packing_clearance_in"]
+            rolls_across * width_in
+            + PACKING["packing_clearance_in"]
         )
 
         main_width_in = (
             excel_ceiling(
-                standard_roll_diameter + PACKING["packing_clearance_in"], 1
+                standard_roll_diameter
+                + PACKING["packing_clearance_in"],
+                1,
             )
             if length_ft == 50
             else excel_ceiling(
-                2 * standard_roll_diameter + PACKING["packing_clearance_in"],
+                2 * standard_roll_diameter
+                + PACKING["packing_clearance_in"],
                 1,
             )
         )
 
         main_height_in = excel_ceiling(
-            standard_roll_diameter + PACKING["packing_clearance_in"], 1
+            standard_roll_diameter
+            + PACKING["packing_clearance_in"],
+            1,
         )
 
         crate = calculate_crate_weight(
-    main_length_in, main_width_in, main_height_in
-)
+            main_length_in,
+            main_width_in,
+            main_height_in,
+        )
 
-main_footage_total = length_ft - actual_leftover
-main_footage_per_box = main_footage_total / main_box_quantity
+        main_footage_total = length_ft - actual_leftover
 
-box_types.append(
+        main_footage_per_box = (
+            main_footage_total / main_box_quantity
+        )
+
+        box_types.append(
             {
                 "quantity": main_box_quantity,
                 "length_in": main_length_in,
@@ -913,20 +953,38 @@ box_types.append(
             }
         )
 
-    remaining_rolls = actual_leftover / PACKING["standard_roll_length_ft"]
+    remaining_rolls = (
+        actual_leftover
+        / PACKING["standard_roll_length_ft"]
+    )
 
     if remaining_rolls > 0 and remaining_rolls < 3:
         if remaining_rolls <= 1:
-            roll_count = excel_ceiling(remaining_rolls, 1)
+            roll_count = excel_ceiling(
+                remaining_rolls,
+                1,
+            )
+
             roll_length_ft = actual_leftover / roll_count
-            roll_diameter_in = diameter_lookup(diameter_table, roll_length_ft)
+
+            roll_diameter_in = diameter_lookup(
+                diameter_table,
+                roll_length_ft,
+            )
+
             second_length_in = (
-                roll_count * width_in + PACKING["packing_clearance_in"]
+                roll_count * width_in
+                + PACKING["packing_clearance_in"]
             )
+
             second_width_in = excel_ceiling(
-                roll_diameter_in + PACKING["packing_clearance_in"], 1
+                roll_diameter_in
+                + PACKING["packing_clearance_in"],
+                1,
             )
+
             second_height_in = second_width_in
+
         else:
             calculated_rolls_across = (
                 1
@@ -935,16 +993,23 @@ box_types.append(
                 if actual_leftover <= 200
                 else 3
             )
+
             maximum_rolls_across = excel_floor(
-                PACKING["maximum_box_length_in"] / width_in, 1
+                PACKING["maximum_box_length_in"]
+                / width_in,
+                1,
             )
+
             actual_rolls_across = min(
-                calculated_rolls_across, max(1, maximum_rolls_across)
+                calculated_rolls_across,
+                max(1, maximum_rolls_across),
             )
+
             second_length_in = (
                 actual_rolls_across * width_in
                 + PACKING["packing_clearance_in"]
             )
+
             second_width_in = (
                 excel_ceiling(
                     standard_roll_diameter
@@ -958,12 +1023,17 @@ box_types.append(
                     1,
                 )
             )
+
             second_height_in = excel_ceiling(
-                standard_roll_diameter + PACKING["packing_clearance_in"], 1
+                standard_roll_diameter
+                + PACKING["packing_clearance_in"],
+                1,
             )
 
         crate = calculate_crate_weight(
-            second_length_in, second_width_in, second_height_in
+            second_length_in,
+            second_width_in,
+            second_height_in,
         )
 
         box_types.append(
@@ -976,20 +1046,27 @@ box_types.append(
                 "footage_per_box_ft": actual_leftover,
             }
         )
-packed_footage = sum(
-    box["quantity"] * box["footage_per_box_ft"]
-    for box in box_types
-)
 
-if abs(packed_footage - length_ft) > 0.01:
-    raise ValueError(
-        f"Packing footage mismatch: boxes contain "
-        f"{packed_footage:.2f} ft, but the belt length is "
-        f"{length_ft:.2f} ft."
+    packed_footage = sum(
+        box["quantity"] * box["footage_per_box_ft"]
+        for box in box_types
     )
-    total_quantity = sum(box["quantity"] for box in box_types)
+
+    if abs(packed_footage - length_ft) > 0.01:
+        raise ValueError(
+            f"Packing footage mismatch: boxes contain "
+            f"{packed_footage:.2f} ft, but the belt length is "
+            f"{length_ft:.2f} ft."
+        )
+
+    total_quantity = sum(
+        box["quantity"]
+        for box in box_types
+    )
+
     total_tare_lb = sum(
-        box["quantity"] * box["tare_each_lb"] for box in box_types
+        box["quantity"] * box["tare_each_lb"]
+        for box in box_types
     )
 
     return {
@@ -997,7 +1074,7 @@ if abs(packed_footage - length_ft) > 0.01:
         "total_tare_lb": total_tare_lb,
         "box_types": box_types,
     }
-
+    
 
 @app.route("/belt-weight-options", methods=["GET"])
 def belt_weight_options():
