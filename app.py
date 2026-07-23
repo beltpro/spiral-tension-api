@@ -1180,6 +1180,42 @@ def belt_weight_packing():
         packing = calculate_packing(
             width_in, length_ft, definition["thickness_in"]
         )
+        # Add belt and gross weight information to each box type.
+raw_total_net_lb = weight_lb_ft * length_ft
+
+allocated_net_lb = 0.0
+
+for index, box in enumerate(packing["box_types"]):
+    quantity = box["quantity"]
+
+    raw_net_each_lb = (
+        weight_lb_ft * box["footage_per_box_ft"]
+    )
+
+    # Use the final box type to absorb the small difference caused
+    # by rounding the displayed total net belt weight upward.
+    if index == len(packing["box_types"]) - 1:
+        remaining_net_lb = (
+            workbook_net_belt_lb - allocated_net_lb
+        )
+
+        net_each_lb = remaining_net_lb / quantity
+    else:
+        net_each_lb = raw_net_each_lb
+        allocated_net_lb += net_each_lb * quantity
+
+    box["net_belt_weight_each_lb"] = net_each_lb
+    box["gross_weight_each_lb"] = (
+        net_each_lb + box["tare_each_lb"]
+    )
+
+    box["net_belt_weight_each_kg"] = (
+        net_each_lb * LB_TO_KG
+    )
+
+    box["gross_weight_each_kg"] = (
+        box["gross_weight_each_lb"] * LB_TO_KG
+    )
 
         gross_lb = workbook_net_belt_lb + packing["total_tare_lb"]
 
