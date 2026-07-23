@@ -115,6 +115,7 @@ CORS(app, resources={
     r"/oven-band-force": {"origins": "https://www.beltpro.com.br"},
     r"/turn-ratio": {"origins": "https://www.beltpro.com.br"},
     r"/side-drive-sizing": {"origins": "https://www.beltpro.com.br"},
+    r"/spiral-drive-motor-sizing": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -2876,6 +2877,477 @@ def side_drive_sizing():
         return jsonify({
             "error": "The server could not complete the calculation."
         }), 500
+
+
+
+# ==========================================================
+# SPIRAL DRIVE MOTOR SIZING CALCULATOR
+# All torque, RPM, power and motor-selection calculations
+# run only on Render.
+# ==========================================================
+
+class SpiralDriveMotorSizingCalculator:
+    LBFT_PER_KGM = 0.671968975
+    FT_PER_M = 3.280839895
+    N_PER_LBF = 4.4482216153
+
+    STANDARD_MOTOR_SIZES_KW = [
+        0.12, 0.18, 0.25, 0.37, 0.55, 0.75,
+        1.10, 1.50, 2.20, 3.00, 4.00, 5.50,
+        7.50, 9.20, 11.00, 15.00, 18.50, 22.00,
+        30.00, 37.00, 45.00, 55.00, 75.00, 90.00,
+        110.00, 132.00, 160.00, 200.00, 250.00,
+        315.00,
+    ]
+
+    @staticmethod
+    def next_standard_motor(required_power_kw):
+        if required_power_kw <= 0:
+            return SpiralDriveMotorSizingCalculator.STANDARD_MOTOR_SIZES_KW[0]
+
+        for motor_size in (
+            SpiralDriveMotorSizingCalculator.STANDARD_MOTOR_SIZES_KW
+        ):
+            if motor_size >= required_power_kw:
+                return motor_size
+
+        return math.ceil(required_power_kw / 10.0) * 10.0
+
+    @staticmethod
+    def calculate(
+        drum_diameter_mm,
+        belt_width_mm,
+        tiers,
+        belt_speed_m_min,
+        belt_weight_kg_m,
+        product_load_kg_m,
+        support_type,
+        support_friction,
+        driven_radius_mode,
+        driven_sprocket_radius_mm,
+        equivalent_belt_length_m,
+        secondary_friction,
+        secondary_pitch_diameter_mm,
+        drum_efficiency,
+        secondary_efficiency,
+        drum_service_factor,
+        secondary_service_factor,
+        motor_rpm,
+    ):
+        numeric_values = {
+            "drum diameter": drum_diameter_mm,
+            "belt width": belt_width_mm,
+            "number of tiers": tiers,
+            "belt speed": belt_speed_m_min,
+            "belt weight": belt_weight_kg_m,
+            "product load": product_load_kg_m,
+            "support friction": support_friction,
+            "equivalent belt length": equivalent_belt_length_m,
+            "secondary friction": secondary_friction,
+            "secondary sprocket pitch diameter":
+                secondary_pitch_diameter_mm,
+            "drum efficiency": drum_efficiency,
+            "secondary efficiency": secondary_efficiency,
+            "drum service factor": drum_service_factor,
+            "secondary service factor": secondary_service_factor,
+            "motor RPM": motor_rpm,
+        }
+
+        for field_name, value in numeric_values.items():
+            if not math.isfinite(value):
+                raise ValueError(
+                    f"{field_name.capitalize()} must be a finite number."
+                )
+
+        if drum_diameter_mm <= 0:
+            raise ValueError(
+                "Drum diameter must be greater than zero."
+            )
+
+        if belt_width_mm <= 0:
+            raise ValueError(
+                "Belt width must be greater than zero."
+            )
+
+        if tiers <= 0:
+            raise ValueError(
+                "Number of tiers must be greater than zero."
+            )
+
+        if belt_speed_m_min <= 0:
+            raise ValueError(
+                "Belt speed must be greater than zero."
+            )
+
+        if belt_weight_kg_m < 0 or product_load_kg_m < 0:
+            raise ValueError(
+                "Belt weight and product load cannot be negative."
+            )
+
+        if belt_weight_kg_m + product_load_kg_m <= 0:
+            raise ValueError(
+                "The combined belt and product load must be greater than zero."
+            )
+
+        if support_type not in {"plastic", "steel"}:
+            raise ValueError(
+                "Support rails must be plastic or steel."
+            )
+
+        if support_friction <= 0 or support_friction > 1:
+            raise ValueError(
+                "Support friction must be greater than 0 and no more than 1.00."
+            )
+
+        if driven_radius_mode not in {"cage", "custom"}:
+            raise ValueError(
+                "Invalid drum driven-radius selection."
+            )
+
+        if equivalent_belt_length_m < 0:
+            raise ValueError(
+                "Equivalent belt length cannot be negative."
+            )
+
+        if secondary_friction < 0 or secondary_friction > 1:
+            raise ValueError(
+                "Secondary friction must be between 0 and 1.00."
+            )
+
+        if secondary_pitch_diameter_mm <= 0:
+            raise ValueError(
+                "Secondary sprocket pitch diameter must be greater than zero."
+            )
+
+        if not 0 < drum_efficiency <= 1:
+            raise ValueError(
+                "Drum transmission efficiency must be greater than 0 "
+                "and no more than 1.00."
+            )
+
+        if not 0 < secondary_efficiency <= 1:
+            raise ValueError(
+                "Secondary transmission efficiency must be greater than 0 "
+                "and no more than 1.00."
+            )
+
+        if drum_service_factor < 1:
+            raise ValueError(
+                "Drum service factor must be at least 1.00."
+            )
+
+        if secondary_service_factor < 1:
+            raise ValueError(
+                "Secondary service factor must be at least 1.00."
+            )
+
+        if motor_rpm <= 0:
+            raise ValueError(
+                "Motor nominal speed must be greater than zero."
+            )
+
+        drum_diameter_m = drum_diameter_mm / 1000.0
+        cage_radius_m = drum_diameter_m / 2.0
+        belt_width_m = belt_width_mm / 1000.0
+        system_radius_m = cage_radius_m + belt_width_m
+
+        total_linear_load_kg_m = (
+            belt_weight_kg_m + product_load_kg_m
+        )
+
+        total_linear_load_lb_ft = (
+            total_linear_load_kg_m
+            * SpiralDriveMotorSizingCalculator.LBFT_PER_KGM
+        )
+
+        system_radius_ft = (
+            system_radius_m
+            * SpiralDriveMotorSizingCalculator.FT_PER_M
+        )
+
+        if support_type == "steel":
+            resistance_multiplier = 2.0 * math.pi
+            reference_friction = 0.35
+        else:
+            resistance_multiplier = math.pi
+            reference_friction = 0.20
+
+        friction_correction = (
+            support_friction / reference_friction
+        )
+
+        cage_pull_lbf = (
+            resistance_multiplier
+            * tiers
+            * system_radius_ft
+            * total_linear_load_lb_ft
+            * friction_correction
+        )
+
+        cage_pull_n = (
+            cage_pull_lbf
+            * SpiralDriveMotorSizingCalculator.N_PER_LBF
+        )
+
+        if driven_radius_mode == "custom":
+            if (
+                driven_sprocket_radius_mm is None
+                or not math.isfinite(driven_sprocket_radius_mm)
+                or driven_sprocket_radius_mm <= 0
+            ):
+                raise ValueError(
+                    "Custom driven sprocket radius must be greater than zero."
+                )
+
+            driven_radius_m = driven_sprocket_radius_mm / 1000.0
+        else:
+            driven_radius_m = cage_radius_m
+
+        driven_sprocket_pull_n = (
+            cage_pull_n
+            * cage_radius_m
+            / driven_radius_m
+        )
+
+        drum_output_torque_nm = (
+            driven_sprocket_pull_n
+            * driven_radius_m
+        )
+
+        cage_surface_speed_m_min = (
+            belt_speed_m_min
+            * cage_radius_m
+            / system_radius_m
+        )
+
+        drum_rpm = (
+            cage_surface_speed_m_min
+            / (2.0 * math.pi * cage_radius_m)
+        )
+
+        drum_mechanical_power_kw = (
+            drum_output_torque_nm
+            * drum_rpm
+            / 9550.0
+        )
+
+        drum_required_motor_power_kw = (
+            drum_mechanical_power_kw
+            / drum_efficiency
+            * drum_service_factor
+        )
+
+        drum_recommended_motor_kw = (
+            SpiralDriveMotorSizingCalculator.next_standard_motor(
+                drum_required_motor_power_kw
+            )
+        )
+
+        drum_reducer_ratio = motor_rpm / drum_rpm
+
+        equivalent_belt_length_ft = (
+            equivalent_belt_length_m
+            * SpiralDriveMotorSizingCalculator.FT_PER_M
+        )
+
+        secondary_pull_lbf = (
+            system_radius_ft * total_linear_load_lb_ft
+            + total_linear_load_lb_ft
+            * equivalent_belt_length_ft
+            * secondary_friction
+        )
+
+        secondary_pull_n = (
+            secondary_pull_lbf
+            * SpiralDriveMotorSizingCalculator.N_PER_LBF
+        )
+
+        secondary_pitch_diameter_m = (
+            secondary_pitch_diameter_mm / 1000.0
+        )
+
+        secondary_pitch_radius_m = (
+            secondary_pitch_diameter_m / 2.0
+        )
+
+        secondary_output_torque_nm = (
+            secondary_pull_n
+            * secondary_pitch_radius_m
+        )
+
+        secondary_rpm = (
+            belt_speed_m_min
+            / (math.pi * secondary_pitch_diameter_m)
+        )
+
+        secondary_mechanical_power_kw = (
+            secondary_output_torque_nm
+            * secondary_rpm
+            / 9550.0
+        )
+
+        secondary_required_motor_power_kw = (
+            secondary_mechanical_power_kw
+            / secondary_efficiency
+            * secondary_service_factor
+        )
+
+        secondary_recommended_motor_kw = (
+            SpiralDriveMotorSizingCalculator.next_standard_motor(
+                secondary_required_motor_power_kw
+            )
+        )
+
+        secondary_reducer_ratio = (
+            motor_rpm / secondary_rpm
+        )
+
+        total_installed_power_kw = (
+            drum_recommended_motor_kw
+            + secondary_recommended_motor_kw
+        )
+
+        return {
+            "drum": {
+                "output_torque_nm": drum_output_torque_nm,
+                "output_torque_knm": drum_output_torque_nm / 1000.0,
+                "rpm": drum_rpm,
+                "cage_pull_n": cage_pull_n,
+                "driven_sprocket_pull_n": driven_sprocket_pull_n,
+                "cage_surface_speed_m_min": cage_surface_speed_m_min,
+                "mechanical_power_kw": drum_mechanical_power_kw,
+                "required_motor_power_kw":
+                    drum_required_motor_power_kw,
+                "recommended_motor_kw":
+                    drum_recommended_motor_kw,
+                "reducer_ratio": drum_reducer_ratio,
+            },
+            "secondary": {
+                "output_torque_nm": secondary_output_torque_nm,
+                "rpm": secondary_rpm,
+                "belt_pull_n": secondary_pull_n,
+                "mechanical_power_kw":
+                    secondary_mechanical_power_kw,
+                "required_motor_power_kw":
+                    secondary_required_motor_power_kw,
+                "recommended_motor_kw":
+                    secondary_recommended_motor_kw,
+                "reducer_ratio": secondary_reducer_ratio,
+            },
+            "total_installed_power_kw": total_installed_power_kw,
+        }
+
+
+@app.route("/spiral-drive-motor-sizing", methods=["POST"])
+def spiral_drive_motor_sizing():
+    data = request.get_json(silent=True) or {}
+
+    required_fields = [
+        "drum_diameter_mm",
+        "belt_width_mm",
+        "tiers",
+        "belt_speed_m_min",
+        "belt_weight_kg_m",
+        "product_load_kg_m",
+        "support_type",
+        "support_friction",
+        "driven_radius_mode",
+        "equivalent_belt_length_m",
+        "secondary_friction",
+        "secondary_pitch_diameter_mm",
+        "drum_efficiency",
+        "secondary_efficiency",
+        "drum_service_factor",
+        "secondary_service_factor",
+        "motor_rpm",
+    ]
+
+    missing = [
+        field
+        for field in required_fields
+        if field not in data or data[field] in (None, "")
+    ]
+
+    if missing:
+        return jsonify({
+            "error": f"Missing fields: {', '.join(missing)}"
+        }), 400
+
+    try:
+        driven_radius_raw = data.get(
+            "driven_sprocket_radius_mm"
+        )
+
+        driven_sprocket_radius_mm = (
+            None
+            if driven_radius_raw in (None, "")
+            else float(driven_radius_raw)
+        )
+
+        result = SpiralDriveMotorSizingCalculator.calculate(
+            drum_diameter_mm=float(data["drum_diameter_mm"]),
+            belt_width_mm=float(data["belt_width_mm"]),
+            tiers=float(data["tiers"]),
+            belt_speed_m_min=float(data["belt_speed_m_min"]),
+            belt_weight_kg_m=float(data["belt_weight_kg_m"]),
+            product_load_kg_m=float(data["product_load_kg_m"]),
+            support_type=str(
+                data["support_type"]
+            ).strip().lower(),
+            support_friction=float(data["support_friction"]),
+            driven_radius_mode=str(
+                data["driven_radius_mode"]
+            ).strip().lower(),
+            driven_sprocket_radius_mm=driven_sprocket_radius_mm,
+            equivalent_belt_length_m=float(
+                data["equivalent_belt_length_m"]
+            ),
+            secondary_friction=float(
+                data["secondary_friction"]
+            ),
+            secondary_pitch_diameter_mm=float(
+                data["secondary_pitch_diameter_mm"]
+            ),
+            drum_efficiency=float(data["drum_efficiency"]),
+            secondary_efficiency=float(
+                data["secondary_efficiency"]
+            ),
+            drum_service_factor=float(
+                data["drum_service_factor"]
+            ),
+            secondary_service_factor=float(
+                data["secondary_service_factor"]
+            ),
+            motor_rpm=float(data["motor_rpm"]),
+        )
+
+        return jsonify({
+            "success": True,
+            "drum": {
+                key: round(value, 10)
+                for key, value in result["drum"].items()
+            },
+            "secondary": {
+                key: round(value, 10)
+                for key, value in result["secondary"].items()
+            },
+            "total_installed_power_kw": round(
+                result["total_installed_power_kw"],
+                10,
+            ),
+        })
+
+    except (TypeError, ValueError, KeyError) as ex:
+        return jsonify({"error": str(ex)}), 400
+
+    except Exception:
+        app.logger.exception(
+            "Spiral drive motor sizing calculation failed."
+        )
+        return jsonify({
+            "error": "The server could not complete the calculation."
+        }), 500
+
 
 @app.route("/", methods=["GET"])
 def health():
