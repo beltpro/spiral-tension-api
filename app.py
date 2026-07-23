@@ -246,66 +246,205 @@ CYCLES_REQUIRED_FIELDS = [
 
 class AirPressureCalculator:
     @staticmethod
-    def calculate(belt_width, num_cylinders, cylinder_diameter, piston_diameter,
-                  woven_belt, air_pressure_setting, span_sag, product_weight,
-                  deflection_required, span_required):
+    def cylinder_area(
+        num_cylinders,
+        cylinder_diameter,
+        piston_diameter
+    ):
+        if num_cylinders <= 0:
+            raise ValueError(
+                "Number of cylinders must be greater than 0."
+            )
+
+        if cylinder_diameter <= 0:
+            raise ValueError(
+                "Cylinder diameter must be greater than 0."
+            )
+
+        if piston_diameter < 0:
+            raise ValueError(
+                "Piston diameter cannot be negative."
+            )
 
         if cylinder_diameter <= piston_diameter:
             raise ValueError(
-                "Air Cylinder Diameter must be greater than Piston Diameter."
+                "Air Cylinder Diameter must be greater than "
+                "Piston Diameter."
             )
 
         area_per_cylinder = (
             math.pi * (cylinder_diameter / 2) ** 2
             - math.pi * (piston_diameter / 2) ** 2
         )
+
         total_area = area_per_cylinder * num_cylinders
 
         if total_area <= 0:
-            raise ValueError("Total cylinder area must be greater than 0.")
+            raise ValueError(
+                "Total cylinder area must be greater than 0."
+            )
+
+        return area_per_cylinder, total_area
+
+    @staticmethod
+    def belt_weight(belt_width):
+        if belt_width <= 0:
+            raise ValueError(
+                "Belt width must be greater than 0."
+            )
+
+        return 4.2 * (belt_width / 12.0)
+
+    @staticmethod
+    def calculate_pressure(
+        belt_width,
+        num_cylinders,
+        cylinder_diameter,
+        piston_diameter,
+        woven_belt
+    ):
+        area_per_cylinder, total_area = (
+            AirPressureCalculator.cylinder_area(
+                num_cylinders,
+                cylinder_diameter,
+                piston_diameter
+            )
+        )
+
+        if belt_width <= 0:
+            raise ValueError(
+                "Belt width must be greater than 0."
+            )
 
         required_tension = belt_width * 100
+
         if woven_belt:
             required_tension *= 2
 
-        calculated_air_pressure = required_tension / total_area
-
-        belt_weight_per_ft = 4.2 * (belt_width / 12.0)
-
-        if air_pressure_setting <= 0:
-            raise ValueError("Air Pressure Setting must be greater than 0.")
-
-        deflection = (
-            (belt_weight_per_ft + product_weight) * span_sag ** 2
-        ) / (96 * air_pressure_setting * total_area)
-
-        if deflection_required <= 0:
-            raise ValueError("Deflection Required must be greater than 0.")
-
-        required_tension_drive = (
-            (belt_weight_per_ft + product_weight) * span_required ** 2
-        ) / (96 * deflection_required)
-
-        required_air_pressure = required_tension_drive / total_area
+        calculated_air_pressure = (
+            required_tension / total_area
+        )
 
         return {
             "Area Per Cylinder": area_per_cylinder,
             "Total Cylinder Area": total_area,
             "Total Required Take-Up Tension": required_tension,
-            "Calculated Air Pressure Setting": calculated_air_pressure,
-            "Belt Weight Per Linear Foot": belt_weight_per_ft,
-            "Deflection Between Supports": deflection,
-            "Required Tension At Drive": required_tension_drive,
-            "Required Air Pressure": required_air_pressure,
+            "Calculated Air Pressure Setting":
+                calculated_air_pressure,
         }
 
+    @staticmethod
+    def calculate_sag(
+        belt_width,
+        num_cylinders,
+        cylinder_diameter,
+        piston_diameter,
+        air_pressure_setting,
+        span_sag,
+        product_weight
+    ):
+        area_per_cylinder, total_area = (
+            AirPressureCalculator.cylinder_area(
+                num_cylinders,
+                cylinder_diameter,
+                piston_diameter
+            )
+        )
 
-AIR_PRESSURE_REQUIRED_FIELDS = [
-    "belt_width", "num_cylinders", "cylinder_diameter", "piston_diameter",
-    "woven_belt", "air_pressure_setting", "span_sag", "product_weight",
-    "deflection_required", "span_required",
-]
+        belt_weight_per_ft = (
+            AirPressureCalculator.belt_weight(belt_width)
+        )
 
+        if air_pressure_setting <= 0:
+            raise ValueError(
+                "Air pressure setting must be greater than 0."
+            )
+
+        if span_sag <= 0:
+            raise ValueError(
+                "Span between supports must be greater than 0."
+            )
+
+        if product_weight < 0:
+            raise ValueError(
+                "Product weight cannot be negative."
+            )
+
+        deflection = (
+            (belt_weight_per_ft + product_weight)
+            * span_sag ** 2
+        ) / (
+            96
+            * air_pressure_setting
+            * total_area
+        )
+
+        return {
+            "Area Per Cylinder": area_per_cylinder,
+            "Total Cylinder Area": total_area,
+            "Belt Weight Per Linear Foot":
+                belt_weight_per_ft,
+            "Deflection Between Supports": deflection,
+        }
+
+    @staticmethod
+    def calculate_pressure_for_sag(
+        belt_width,
+        num_cylinders,
+        cylinder_diameter,
+        piston_diameter,
+        product_weight,
+        deflection_required,
+        span_required
+    ):
+        area_per_cylinder, total_area = (
+            AirPressureCalculator.cylinder_area(
+                num_cylinders,
+                cylinder_diameter,
+                piston_diameter
+            )
+        )
+
+        belt_weight_per_ft = (
+            AirPressureCalculator.belt_weight(belt_width)
+        )
+
+        if product_weight < 0:
+            raise ValueError(
+                "Product weight cannot be negative."
+            )
+
+        if deflection_required <= 0:
+            raise ValueError(
+                "Required deflection must be greater than 0."
+            )
+
+        if span_required <= 0:
+            raise ValueError(
+                "Span between supports must be greater than 0."
+            )
+
+        required_tension_drive = (
+            (belt_weight_per_ft + product_weight)
+            * span_required ** 2
+        ) / (
+            96 * deflection_required
+        )
+
+        required_air_pressure = (
+            required_tension_drive / total_area
+        )
+
+        return {
+            "Area Per Cylinder": area_per_cylinder,
+            "Total Cylinder Area": total_area,
+            "Belt Weight Per Linear Foot":
+                belt_weight_per_ft,
+            "Required Tension At Drive":
+                required_tension_drive,
+            "Required Air Pressure":
+                required_air_pressure,
+        }
 
 
 
@@ -384,37 +523,177 @@ def cycles():
 @app.route("/air-pressure", methods=["POST"])
 def air_pressure():
     data = request.get_json(silent=True) or {}
+    action = str(data.get("action", "")).strip().lower()
 
-    missing = [f for f in AIR_PRESSURE_REQUIRED_FIELDS if f not in data]
+    required_fields_by_action = {
+        "calculate_pressure": [
+            "belt_width",
+            "num_cylinders",
+            "cylinder_diameter",
+            "piston_diameter",
+            "woven_belt",
+        ],
+        "calculate_sag": [
+            "belt_width",
+            "num_cylinders",
+            "cylinder_diameter",
+            "piston_diameter",
+            "air_pressure_setting",
+            "span_sag",
+            "product_weight",
+        ],
+        "calculate_pressure_for_sag": [
+            "belt_width",
+            "num_cylinders",
+            "cylinder_diameter",
+            "piston_diameter",
+            "product_weight",
+            "deflection_required",
+            "span_required",
+        ],
+    }
+
+    if action not in required_fields_by_action:
+        return jsonify({
+            "error": (
+                "Invalid or missing action. Use calculate_pressure, "
+                "calculate_sag, or calculate_pressure_for_sag."
+            )
+        }), 400
+
+    missing = [
+        field
+        for field in required_fields_by_action[action]
+        if field not in data or data[field] in (None, "")
+    ]
+
     if missing:
-        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+        return jsonify({
+            "error": f"Missing fields: {', '.join(missing)}"
+        }), 400
 
     try:
-        result = AirPressureCalculator.calculate(
-            float(data["belt_width"]),
-            float(data["num_cylinders"]),
-            float(data["cylinder_diameter"]),
-            float(data["piston_diameter"]),
-            bool(data["woven_belt"]),
-            float(data["air_pressure_setting"]),
-            float(data["span_sag"]),
-            float(data["product_weight"]),
-            float(data["deflection_required"]),
-            float(data["span_required"]),
+        belt_width = float(data["belt_width"])
+        num_cylinders = float(data["num_cylinders"])
+        cylinder_diameter = float(data["cylinder_diameter"])
+        piston_diameter = float(data["piston_diameter"])
+
+        if action == "calculate_pressure":
+            woven_value = data["woven_belt"]
+
+            if isinstance(woven_value, bool):
+                woven_belt = woven_value
+            elif isinstance(woven_value, str):
+                normalized = woven_value.strip().lower()
+                if normalized in {"true", "1", "yes", "on"}:
+                    woven_belt = True
+                elif normalized in {"false", "0", "no", "off"}:
+                    woven_belt = False
+                else:
+                    raise ValueError(
+                        "woven_belt must be true or false."
+                    )
+            else:
+                woven_belt = bool(woven_value)
+
+            result = AirPressureCalculator.calculate_pressure(
+                belt_width=belt_width,
+                num_cylinders=num_cylinders,
+                cylinder_diameter=cylinder_diameter,
+                piston_diameter=piston_diameter,
+                woven_belt=woven_belt,
+            )
+
+            return jsonify({
+                "success": True,
+                "action": action,
+                "area_per_cylinder": round(
+                    result["Area Per Cylinder"], 2
+                ),
+                "total_cylinder_area": round(
+                    result["Total Cylinder Area"], 2
+                ),
+                "total_required_tension": round(
+                    result["Total Required Take-Up Tension"]
+                ),
+                "calculated_air_pressure": round(
+                    result["Calculated Air Pressure Setting"], 1
+                ),
+            })
+
+        if action == "calculate_sag":
+            result = AirPressureCalculator.calculate_sag(
+                belt_width=belt_width,
+                num_cylinders=num_cylinders,
+                cylinder_diameter=cylinder_diameter,
+                piston_diameter=piston_diameter,
+                air_pressure_setting=float(
+                    data["air_pressure_setting"]
+                ),
+                span_sag=float(data["span_sag"]),
+                product_weight=float(data["product_weight"]),
+            )
+
+            return jsonify({
+                "success": True,
+                "action": action,
+                "area_per_cylinder": round(
+                    result["Area Per Cylinder"], 2
+                ),
+                "total_cylinder_area": round(
+                    result["Total Cylinder Area"], 2
+                ),
+                "belt_weight_per_ft": round(
+                    result["Belt Weight Per Linear Foot"], 2
+                ),
+                "deflection": round(
+                    result["Deflection Between Supports"], 4
+                ),
+            })
+
+        result = AirPressureCalculator.calculate_pressure_for_sag(
+            belt_width=belt_width,
+            num_cylinders=num_cylinders,
+            cylinder_diameter=cylinder_diameter,
+            piston_diameter=piston_diameter,
+            product_weight=float(data["product_weight"]),
+            deflection_required=float(
+                data["deflection_required"]
+            ),
+            span_required=float(data["span_required"]),
         )
-    except (ValueError, TypeError) as ex:
+
+        return jsonify({
+            "success": True,
+            "action": action,
+            "area_per_cylinder": round(
+                result["Area Per Cylinder"], 2
+            ),
+            "total_cylinder_area": round(
+                result["Total Cylinder Area"], 2
+            ),
+            "belt_weight_per_ft": round(
+                result["Belt Weight Per Linear Foot"], 2
+            ),
+            "required_tension_drive": round(
+                result["Required Tension At Drive"]
+            ),
+            "required_air_pressure": round(
+                result["Required Air Pressure"], 1
+            ),
+        })
+
+    except (ValueError, TypeError, KeyError) as ex:
         return jsonify({"error": f"Invalid input: {ex}"}), 400
 
-    return jsonify({
-        "area_per_cylinder": round(result["Area Per Cylinder"], 2),
-        "total_cylinder_area": round(result["Total Cylinder Area"], 2),
-        "total_required_tension": round(result["Total Required Take-Up Tension"]),
-        "calculated_air_pressure": round(result["Calculated Air Pressure Setting"], 1),
-        "belt_weight_per_ft": round(result["Belt Weight Per Linear Foot"], 2),
-        "deflection": round(result["Deflection Between Supports"], 4),
-        "required_tension_drive": round(result["Required Tension At Drive"]),
-        "required_air_pressure": round(result["Required Air Pressure"], 1),
-    })
+    except Exception:
+        app.logger.exception(
+            "CB5 air-pressure calculation failed."
+        )
+        return jsonify({
+            "error": "The server could not complete the calculation."
+        }), 500
+
 
 @app.route("/belt-types", methods=["GET"])
 def belt_types():
