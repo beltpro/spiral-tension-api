@@ -1112,19 +1112,29 @@ def belt_weight_packing():
         width_unit = str(data.get("width_unit", "in")).strip()
         length_unit = str(data.get("length_unit", "ft")).strip()
         mesh_key = str(data.get("mesh", "none")).strip() or "none"
-        center_link = float(data.get("center_link", 0) or 0)
+
+        center_link = float(
+            data.get("center_link", 0) or 0
+        )
+
         center_link_unit = str(
             data.get("center_link_unit", "in")
         ).strip()
 
         if belt_type not in BELT_WEIGHT_DEFINITIONS:
-            raise ValueError("Please select a valid belt type.")
+            raise ValueError(
+                "Please select a valid belt type."
+            )
 
         if not math.isfinite(width) or width <= 0:
-            raise ValueError("Please enter a valid belt width.")
+            raise ValueError(
+                "Please enter a valid belt width."
+            )
 
         if not math.isfinite(length) or length <= 0:
-            raise ValueError("Please enter a valid belt length.")
+            raise ValueError(
+                "Please enter a valid belt length."
+            )
 
         if width_unit not in {"in", "mm"}:
             raise ValueError("Invalid width unit.")
@@ -1135,8 +1145,18 @@ def belt_weight_packing():
         if center_link_unit not in {"in", "mm"}:
             raise ValueError("Invalid center-link unit.")
 
-        width_in = width / IN_TO_MM if width_unit == "mm" else width
-        length_ft = length / FT_TO_M if length_unit == "m" else length
+        width_in = (
+            width / IN_TO_MM
+            if width_unit == "mm"
+            else width
+        )
+
+        length_ft = (
+            length / FT_TO_M
+            if length_unit == "m"
+            else length
+        )
+
         center_link_in = (
             center_link / IN_TO_MM
             if center_link_unit == "mm"
@@ -1152,101 +1172,221 @@ def belt_weight_packing():
             )
 
         maximum_width = definition.get("maximum_width")
+
         if maximum_width and width_in > maximum_width:
             raise ValueError(
                 f"The selected belt supports widths up to "
                 f"{maximum_width} inches in this calculator."
             )
 
-        if definition.get("center_link") and center_link_in >= width_in:
+        if (
+            definition.get("center_link")
+            and center_link_in >= width_in
+        ):
             raise ValueError(
-                "Center-link coverage must be smaller than the overall "
-                "belt width."
+                "Center-link coverage must be smaller than "
+                "the overall belt width."
             )
 
         weight_lb_ft = belt_weight_per_foot(
-            belt_type, width_in, mesh_key, center_link_in
+            belt_type,
+            width_in,
+            mesh_key,
+            center_link_in,
         )
 
-        if not math.isfinite(weight_lb_ft) or weight_lb_ft <= 0:
+        if (
+            not math.isfinite(weight_lb_ft)
+            or weight_lb_ft <= 0
+        ):
             raise ValueError(
-                "The selected values did not produce a valid belt weight."
+                "The selected values did not produce "
+                "a valid belt weight."
             )
 
         weight_kg_m = weight_lb_ft * LBFT_TO_KGM
-        total_net_lb = weight_lb_ft * length_ft
-        workbook_net_belt_lb = excel_ceiling(total_net_lb, 1)
+
+        raw_total_net_lb = weight_lb_ft * length_ft
+
+        # Total displayed belt weight is rounded upward
+        # according to the existing workbook behavior.
+        workbook_net_belt_lb = excel_ceiling(
+            raw_total_net_lb,
+            1,
+        )
 
         packing = calculate_packing(
-            width_in, length_ft, definition["thickness_in"]
-        )
-        # Add belt and gross weight information to each box type.
-raw_total_net_lb = weight_lb_ft * length_ft
-
-allocated_net_lb = 0.0
-
-for index, box in enumerate(packing["box_types"]):
-    quantity = box["quantity"]
-
-    raw_net_each_lb = (
-        weight_lb_ft * box["footage_per_box_ft"]
-    )
-
-    # Use the final box type to absorb the small difference caused
-    # by rounding the displayed total net belt weight upward.
-    if index == len(packing["box_types"]) - 1:
-        remaining_net_lb = (
-            workbook_net_belt_lb - allocated_net_lb
+            width_in,
+            length_ft,
+            definition["thickness_in"],
         )
 
-        net_each_lb = remaining_net_lb / quantity
-    else:
-        net_each_lb = raw_net_each_lb
-        allocated_net_lb += net_each_lb * quantity
+        allocated_net_lb = 0.0
+        box_types = packing["box_types"]
 
-    box["net_belt_weight_each_lb"] = net_each_lb
-    box["gross_weight_each_lb"] = (
-        net_each_lb + box["tare_each_lb"]
-    )
+        for index, box in enumerate(box_types):
+            quantity = box["quantity"]
 
-    box["net_belt_weight_each_kg"] = (
-        net_each_lb * LB_TO_KG
-    )
+            if quantity <= 0:
+                raise ValueError(
+                    "Invalid packing box quantity."
+                )
 
-    box["gross_weight_each_kg"] = (
-        box["gross_weight_each_lb"] * LB_TO_KG
-    )
+            # The normal belt weight allocated to this box type.
+            calculated_net_each_lb = (
+                weight_lb_ft
+                * box["footage_per_box_ft"]
+            )
 
-        gross_lb = workbook_net_belt_lb + packing["total_tare_lb"]
+            # The final box type absorbs the small difference
+            # caused by rounding the total belt weight upward.
+            if index == len(box_types) - 1:
+                remaining_net_lb = (
+                    workbook_net_belt_lb
+                    - allocated_net_lb
+                )
+
+                net_each_lb = (
+                    remaining_net_lb / quantity
+                )
+            else:
+                net_each_lb = calculated_net_each_lb
+
+            type_net_total_lb = (
+                net_each_lb * quantity
+            )
+
+            allocated_net_lb += type_net_total_lb
+
+            tare_each_lb = box["tare_each_lb"]
+
+            gross_each_lb = (
+                net_each_lb + tare_each_lb
+            )
+
+            box["net_belt_weight_each_lb"] = (
+                net_each_lb
+            )
+
+            box["net_belt_weight_each_kg"] = (
+                net_each_lb * LB_TO_KG
+            )
+
+            box["gross_weight_each_lb"] = (
+                gross_each_lb
+            )
+
+            box["gross_weight_each_kg"] = (
+                gross_each_lb * LB_TO_KG
+            )
+
+            box["net_belt_weight_total_lb"] = (
+                type_net_total_lb
+            )
+
+            box["tare_weight_total_lb"] = (
+                tare_each_lb * quantity
+            )
+
+            box["gross_weight_total_lb"] = (
+                gross_each_lb * quantity
+            )
+
+        # Verify that all box belt weights equal the total belt weight.
+        calculated_box_net_lb = sum(
+            box["quantity"]
+            * box["net_belt_weight_each_lb"]
+            for box in box_types
+        )
+
+        if (
+            abs(
+                calculated_box_net_lb
+                - workbook_net_belt_lb
+            )
+            > 0.01
+        ):
+            raise ValueError(
+                "The sum of the belt weights assigned "
+                "to the boxes does not match the total "
+                "net belt weight."
+            )
+
+        total_tare_lb = packing["total_tare_lb"]
+
+        gross_lb = (
+            workbook_net_belt_lb
+            + total_tare_lb
+        )
+
+        calculated_box_gross_lb = sum(
+            box["quantity"]
+            * box["gross_weight_each_lb"]
+            for box in box_types
+        )
+
+        if abs(calculated_box_gross_lb - gross_lb) > 0.01:
+            raise ValueError(
+                "The sum of the gross box weights "
+                "does not match the gross shipping weight."
+            )
 
         return jsonify(
             {
                 "success": True,
-                "weight_lb_ft": round(weight_lb_ft, 8),
-                "weight_kg_m": round(weight_kg_m, 8),
-                "net_weight_lb": workbook_net_belt_lb,
-                "net_weight_kg": math.ceil(
-                    workbook_net_belt_lb / 2.204622476
+                "weight_lb_ft": round(
+                    weight_lb_ft,
+                    8,
+                ),
+                "weight_kg_m": round(
+                    weight_kg_m,
+                    8,
+                ),
+                "net_weight_lb": round(
+                    workbook_net_belt_lb,
+                    8,
+                ),
+                "net_weight_kg": round(
+                    workbook_net_belt_lb * LB_TO_KG,
+                    8,
                 ),
                 "box_quantity": packing["quantity"],
-                "box_weight_lb": round(packing["total_tare_lb"], 8),
-                "box_weight_kg": round(
-                    packing["total_tare_lb"] * LB_TO_KG, 8
+                "box_weight_lb": round(
+                    total_tare_lb,
+                    8,
                 ),
-                "gross_weight_lb": round(gross_lb, 8),
-                "gross_weight_kg": math.ceil(gross_lb / 2.204622476),
-                "box_types": packing["box_types"],
+                "box_weight_kg": round(
+                    total_tare_lb * LB_TO_KG,
+                    8,
+                ),
+                "gross_weight_lb": round(
+                    gross_lb,
+                    8,
+                ),
+                "gross_weight_kg": round(
+                    gross_lb * LB_TO_KG,
+                    8,
+                ),
+                "box_types": box_types,
             }
         )
 
     except (TypeError, ValueError) as ex:
-        return jsonify({"error": str(ex)}), 400
+        return jsonify({
+            "error": str(ex)
+        }), 400
 
     except Exception:
-        app.logger.exception("Belt weight and packing calculation failed.")
-        return jsonify(
-            {"error": "The server could not complete the calculation."}
-        ), 500
+        app.logger.exception(
+            "Belt weight and packing calculation failed."
+        )
+
+        return jsonify({
+            "error": (
+                "The server could not complete "
+                "the calculation."
+            )
+        }), 500
 
 
 
