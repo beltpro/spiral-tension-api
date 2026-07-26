@@ -116,6 +116,7 @@ CORS(app, resources={
     r"/turn-ratio": {"origins": "https://www.beltpro.com.br"},
     r"/side-drive-sizing": {"origins": "https://www.beltpro.com.br"},
     r"/spiral-drive-motor-sizing": {"origins": "https://www.beltpro.com.br"},
+    r"/cage-chain-sizing": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -3343,6 +3344,302 @@ def spiral_drive_motor_sizing():
     except Exception:
         app.logger.exception(
             "Spiral drive motor sizing calculation failed."
+        )
+        return jsonify({
+            "error": "The server could not complete the calculation."
+        }), 500
+
+
+# ==========================================================
+# SPIRAL CAGE LOAD & ANSI SIMPLEX CHAIN SIZING CALCULATOR
+# All formulas, unit conversions and chain reference data
+# run only on Render.
+#
+# Reference chain data: U.S. Tsubaki standard ANSI RS simplex
+# roller chain. Maximum allowable loads are catalogue values,
+# not minimum tensile strengths.
+# ==========================================================
+
+class CageChainSizingCalculator:
+    IN_TO_M = 0.0254
+    LBFT_TO_KGM = 1.4881639436
+    LBF_TO_N = 4.4482216153
+    GRAVITY = 9.80665
+
+    # chain, pitch (in), maximum allowable load (lbf)
+    ANSI_SIMPLEX_CHAIN_DATA = [
+        {"chain": "#40-1", "pitch_in": 0.500, "allowable_load_lbf": 810},
+        {"chain": "#50-1", "pitch_in": 0.625, "allowable_load_lbf": 1430},
+        {"chain": "#60-1", "pitch_in": 0.750, "allowable_load_lbf": 1980},
+        {"chain": "#80-1", "pitch_in": 1.000, "allowable_load_lbf": 3300},
+        {"chain": "#100-1", "pitch_in": 1.250, "allowable_load_lbf": 5070},
+        {"chain": "#120-1", "pitch_in": 1.500, "allowable_load_lbf": 6830},
+        {"chain": "#140-1", "pitch_in": 1.750, "allowable_load_lbf": 9040},
+        {"chain": "#160-1", "pitch_in": 2.000, "allowable_load_lbf": 11900},
+        {"chain": "#180-1", "pitch_in": 2.250, "allowable_load_lbf": 13670},
+        {"chain": "#200-1", "pitch_in": 2.500, "allowable_load_lbf": 16090},
+        {"chain": "#240-1", "pitch_in": 3.000, "allowable_load_lbf": 22260},
+    ]
+
+    @staticmethod
+    def length_to_m(value, unit, field_name):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{field_name} must be greater than zero.")
+
+        if unit == "mm":
+            return value / 1000.0
+        if unit == "in":
+            return value * CageChainSizingCalculator.IN_TO_M
+
+        raise ValueError(f"Invalid unit for {field_name}.")
+
+    @staticmethod
+    def mass_to_kg_m(value, unit):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(
+                "Total linear mass must be greater than zero."
+            )
+
+        if unit == "kg/m":
+            return value
+        if unit == "lb/ft":
+            return value * CageChainSizingCalculator.LBFT_TO_KGM
+
+        raise ValueError("Invalid total linear mass unit.")
+
+    @staticmethod
+    def calculate(
+        drum_diameter,
+        drum_diameter_unit,
+        belt_width,
+        belt_width_unit,
+        tiers,
+        total_linear_mass,
+        total_linear_mass_unit,
+        sprocket_pitch_diameter,
+        sprocket_pitch_diameter_unit,
+        service_factor,
+    ):
+        if (
+            not math.isfinite(tiers)
+            or tiers < 1
+            or int(tiers) != tiers
+        ):
+            raise ValueError(
+                "Number of tiers must be a whole number greater than zero."
+            )
+
+        if (
+            not math.isfinite(service_factor)
+            or service_factor < 1.0
+            or service_factor > 3.0
+        ):
+            raise ValueError(
+                "Service factor must be between 1.00 and 3.00."
+            )
+
+        drum_diameter_m = CageChainSizingCalculator.length_to_m(
+            drum_diameter,
+            drum_diameter_unit,
+            "Drum diameter",
+        )
+        belt_width_m = CageChainSizingCalculator.length_to_m(
+            belt_width,
+            belt_width_unit,
+            "Belt width",
+        )
+        sprocket_pitch_diameter_m = (
+            CageChainSizingCalculator.length_to_m(
+                sprocket_pitch_diameter,
+                sprocket_pitch_diameter_unit,
+                "Driven sprocket pitch diameter",
+            )
+        )
+        total_linear_mass_kg_m = (
+            CageChainSizingCalculator.mass_to_kg_m(
+                total_linear_mass,
+                total_linear_mass_unit,
+            )
+        )
+
+        tier_count = int(tiers)
+
+        # Outside-edge radius for a metal spiral belt.
+        outside_radius_m = drum_diameter_m / 2.0 + belt_width_m
+
+        # Total distributed belt + product weight.
+        distributed_weight_n_m = (
+            total_linear_mass_kg_m
+            * CageChainSizingCalculator.GRAVITY
+        )
+
+        # Ashworth-style cage-load relationship using outside-edge radius.
+        cage_load_n = (
+            math.pi
+            * tier_count
+            * outside_radius_m
+            * distributed_weight_n_m
+        )
+
+        cage_torque_nm = cage_load_n * outside_radius_m
+
+        theoretical_chain_pull_n = (
+            2.0 * cage_torque_nm / sprocket_pitch_diameter_m
+        )
+
+        design_chain_pull_n = (
+            theoretical_chain_pull_n * service_factor
+        )
+
+        selected = None
+
+        for chain in CageChainSizingCalculator.ANSI_SIMPLEX_CHAIN_DATA:
+            allowable_load_n = (
+                chain["allowable_load_lbf"]
+                * CageChainSizingCalculator.LBF_TO_N
+            )
+
+            if allowable_load_n >= design_chain_pull_n:
+                selected = {
+                    **chain,
+                    "allowable_load_n": allowable_load_n,
+                }
+                break
+
+        if selected is None:
+            largest = CageChainSizingCalculator.ANSI_SIMPLEX_CHAIN_DATA[-1]
+            largest_allowable_n = (
+                largest["allowable_load_lbf"]
+                * CageChainSizingCalculator.LBF_TO_N
+            )
+
+            return {
+                "recommended_chain": "No suitable simplex chain",
+                "chain_pitch_in": largest["pitch_in"],
+                "allowable_load_n": largest_allowable_n,
+                "outside_radius_m": outside_radius_m,
+                "distributed_weight_n_m": distributed_weight_n_m,
+                "cage_load_n": cage_load_n,
+                "cage_torque_nm": cage_torque_nm,
+                "theoretical_chain_pull_n": theoretical_chain_pull_n,
+                "design_chain_pull_n": design_chain_pull_n,
+                "utilisation_percent": (
+                    design_chain_pull_n / largest_allowable_n * 100.0
+                ),
+                "status": "unsuitable",
+                "status_message": (
+                    "The required design pull exceeds the reference "
+                    "allowable load of ANSI #240-1. Consider a duplex "
+                    "chain, a larger driven sprocket, or a revised drive."
+                ),
+            }
+
+        utilisation_percent = (
+            design_chain_pull_n
+            / selected["allowable_load_n"]
+            * 100.0
+        )
+
+        if utilisation_percent <= 70.0:
+            status = "comfortable"
+            status_message = "Comfortable preliminary selection."
+        elif utilisation_percent <= 85.0:
+            status = "acceptable"
+            status_message = "Acceptable preliminary selection."
+        else:
+            status = "marginal"
+            status_message = (
+                "Marginal preliminary selection. Consider the next "
+                "larger chain and verify the final design with the "
+                "manufacturer."
+            )
+
+        return {
+            "recommended_chain": selected["chain"],
+            "chain_pitch_in": selected["pitch_in"],
+            "allowable_load_n": selected["allowable_load_n"],
+            "outside_radius_m": outside_radius_m,
+            "distributed_weight_n_m": distributed_weight_n_m,
+            "cage_load_n": cage_load_n,
+            "cage_torque_nm": cage_torque_nm,
+            "theoretical_chain_pull_n": theoretical_chain_pull_n,
+            "design_chain_pull_n": design_chain_pull_n,
+            "utilisation_percent": utilisation_percent,
+            "status": status,
+            "status_message": status_message,
+        }
+
+
+@app.route("/cage-chain-sizing", methods=["POST"])
+def cage_chain_sizing():
+    data = request.get_json(silent=True) or {}
+
+    required_fields = [
+        "drum_diameter",
+        "drum_diameter_unit",
+        "belt_width",
+        "belt_width_unit",
+        "tiers",
+        "total_linear_mass",
+        "total_linear_mass_unit",
+        "sprocket_pitch_diameter",
+        "sprocket_pitch_diameter_unit",
+        "service_factor",
+    ]
+
+    missing = [
+        field
+        for field in required_fields
+        if field not in data or data[field] in (None, "")
+    ]
+
+    if missing:
+        return jsonify({
+            "error": f"Missing fields: {', '.join(missing)}"
+        }), 400
+
+    try:
+        result = CageChainSizingCalculator.calculate(
+            drum_diameter=float(data["drum_diameter"]),
+            drum_diameter_unit=str(
+                data["drum_diameter_unit"]
+            ).strip().lower(),
+            belt_width=float(data["belt_width"]),
+            belt_width_unit=str(
+                data["belt_width_unit"]
+            ).strip().lower(),
+            tiers=float(data["tiers"]),
+            total_linear_mass=float(data["total_linear_mass"]),
+            total_linear_mass_unit=str(
+                data["total_linear_mass_unit"]
+            ).strip().lower(),
+            sprocket_pitch_diameter=float(
+                data["sprocket_pitch_diameter"]
+            ),
+            sprocket_pitch_diameter_unit=str(
+                data["sprocket_pitch_diameter_unit"]
+            ).strip().lower(),
+            service_factor=float(data["service_factor"]),
+        )
+
+        return jsonify({
+            "success": True,
+            **{
+                key: (
+                    round(value, 10)
+                    if isinstance(value, float)
+                    else value
+                )
+                for key, value in result.items()
+            },
+        })
+
+    except (TypeError, ValueError, KeyError) as ex:
+        return jsonify({"error": str(ex)}), 400
+
+    except Exception:
+        app.logger.exception(
+            "Cage and ANSI simplex chain sizing calculation failed."
         )
         return jsonify({
             "error": "The server could not complete the calculation."
