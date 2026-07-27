@@ -117,6 +117,7 @@ CORS(app, resources={
     r"/side-drive-sizing": {"origins": "https://www.beltpro.com.br"},
     r"/spiral-drive-motor-sizing": {"origins": "https://www.beltpro.com.br"},
     r"/cage-chain-sizing": {"origins": "https://www.beltpro.com.br"},
+    r"/oven-furnace-belt-tension": {"origins": "https://www.beltpro.com.br"},
 })
 
 
@@ -3640,6 +3641,474 @@ def cage_chain_sizing():
     except Exception:
         app.logger.exception(
             "Cage and ANSI simplex chain sizing calculation failed."
+        )
+        return jsonify({
+            "error": "The server could not complete the calculation."
+        }), 500
+
+
+# ==========================================================
+# OVEN & FURNACE BELT TENSION CALCULATOR
+# All operating tension, effective pull, sag, traction,
+# and drive-torque calculations run only on Render.
+# ==========================================================
+
+OVEN_LBF_TO_N = 4.4482216152605
+OVEN_FT_TO_M = 0.3048
+OVEN_IN_TO_MM = 25.4
+OVEN_LBFT2_TO_KGM2 = 4.88242763638
+OVEN_LBF_FT_TO_NM = 1.35581794833
+
+OVEN_DRIVE_FACTORS = {
+    "metal": {
+        135: 0.98,
+        150: 0.84,
+        165: 0.73,
+        180: 0.64,
+        195: 0.56,
+        210: 0.50,
+        225: 0.44,
+        240: 0.40,
+        255: 0.36,
+        270: 0.32,
+    },
+    "lagged": {
+        135: 0.32,
+        150: 0.26,
+        165: 0.22,
+        180: 0.20,
+        195: 0.15,
+        210: 0.13,
+        225: 0.11,
+        240: 0.09,
+        255: 0.08,
+        270: 0.06,
+    },
+}
+
+
+def oven_number(data, key, allow_zero=False):
+    if key not in data:
+        raise ValueError(f"Missing input: {key}")
+
+    try:
+        value = float(data[key])
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a number")
+
+    if not math.isfinite(value):
+        raise ValueError(f"{key} must be finite")
+
+    if allow_zero:
+        if value < 0:
+            raise ValueError(f"{key} cannot be negative")
+    elif value <= 0:
+        raise ValueError(f"{key} must be greater than zero")
+
+    return value
+
+
+def oven_catenary_tension(load_lb_per_ft, span_in, sag_in):
+    return load_lb_per_ft * span_in ** 2 / (96.0 * sag_in)
+
+
+def oven_catenary_sag(load_lb_per_ft, span_in, tension_lbf):
+    if tension_lbf <= 0:
+        raise ValueError("Tension must be greater than zero")
+
+    return load_lb_per_ft * span_in ** 2 / (96.0 * tension_lbf)
+
+
+def oven_inputs_to_imperial(data):
+    unit_system = str(data.get("unit_system", "SI")).upper()
+
+    values = {
+        "belt_width_ft": oven_number(data, "belt_width"),
+        "belt_weight_lb_ft2": oven_number(data, "belt_weight"),
+        "product_load_lb_ft2": oven_number(
+            data,
+            "product_load",
+            allow_zero=True,
+        ),
+        "drive_diameter_in": oven_number(data, "drive_diameter"),
+    }
+
+    if unit_system == "SI":
+        values["belt_width_ft"] /= OVEN_FT_TO_M * 1000.0
+        values["belt_weight_lb_ft2"] /= OVEN_LBFT2_TO_KGM2
+        values["product_load_lb_ft2"] /= OVEN_LBFT2_TO_KGM2
+        values["drive_diameter_in"] /= OVEN_IN_TO_MM
+    elif unit_system != "IMPERIAL":
+        raise ValueError("unit_system must be SI or Imperial")
+
+    mode = str(data.get("mode", "")).strip().lower()
+
+    if mode == "high":
+        values.update({
+            "first_span_in": oven_number(
+                data,
+                "first_unsupported_span",
+            ),
+            "desired_sag_in": oven_number(data, "desired_sag"),
+            "loading_length_ft": oven_number(
+                data,
+                "loading_length",
+                allow_zero=True,
+            ),
+            "loading_mu": oven_number(data, "loading_mu"),
+            "preheat_length_ft": oven_number(
+                data,
+                "preheat_length",
+                allow_zero=True,
+            ),
+            "preheat_mu": oven_number(data, "preheat_mu"),
+            "hot_length_ft": oven_number(
+                data,
+                "hot_length",
+                allow_zero=True,
+            ),
+            "hot_mu": oven_number(data, "hot_mu"),
+        })
+
+        if unit_system == "SI":
+            values["first_span_in"] /= OVEN_IN_TO_MM
+            values["desired_sag_in"] /= OVEN_IN_TO_MM
+            values["loading_length_ft"] /= OVEN_FT_TO_M
+            values["preheat_length_ft"] /= OVEN_FT_TO_M
+            values["hot_length_ft"] /= OVEN_FT_TO_M
+
+    elif mode == "low":
+        values.update({
+            "conveyor_length_ft": oven_number(
+                data,
+                "conveyor_length",
+            ),
+            "carry_mu": oven_number(data, "carry_mu"),
+            "return_mu": oven_number(data, "return_mu"),
+            "carrying_spacing_in": oven_number(
+                data,
+                "carrying_support_spacing",
+            ),
+            "return_spacing_in": oven_number(
+                data,
+                "return_support_spacing",
+            ),
+        })
+
+        if unit_system == "SI":
+            values["conveyor_length_ft"] /= OVEN_FT_TO_M
+            values["carrying_spacing_in"] /= OVEN_IN_TO_MM
+            values["return_spacing_in"] /= OVEN_IN_TO_MM
+
+    else:
+        raise ValueError("mode must be high or low")
+
+    for key in (
+        "loading_mu",
+        "preheat_mu",
+        "hot_mu",
+        "carry_mu",
+        "return_mu",
+    ):
+        if key in values and values[key] > 1.0:
+            raise ValueError(f"{key} cannot exceed 1.00")
+
+    return unit_system, mode, values
+
+
+def oven_force(value_lbf, unit_system):
+    if unit_system == "SI":
+        return value_lbf * OVEN_LBF_TO_N
+
+    return value_lbf
+
+
+def oven_torque(value_lbft, unit_system):
+    if unit_system == "SI":
+        return value_lbft * OVEN_LBF_FT_TO_NM
+
+    return value_lbft
+
+
+def oven_sag(value_in, unit_system):
+    if unit_system == "SI":
+        return value_in * OVEN_IN_TO_MM
+
+    return value_in
+
+
+def oven_per_width(value_lbf_per_ft, unit_system):
+    if unit_system == "SI":
+        return value_lbf_per_ft * OVEN_LBF_TO_N / OVEN_FT_TO_M
+
+    return value_lbf_per_ft
+
+
+@app.route("/oven-furnace-belt-tension", methods=["POST"])
+def oven_furnace_belt_tension():
+    data = request.get_json(silent=True) or {}
+
+    try:
+        unit_system, mode, values = oven_inputs_to_imperial(data)
+
+        per_width_unit = (
+            "N/m"
+            if unit_system == "SI"
+            else "lbf/ft"
+        )
+
+        belt_linear = (
+            values["belt_weight_lb_ft2"]
+            * values["belt_width_ft"]
+        )
+        product_linear = (
+            values["product_load_lb_ft2"]
+            * values["belt_width_ft"]
+        )
+        loaded_linear = belt_linear + product_linear
+        radius_ft = values["drive_diameter_in"] / 24.0
+
+        if mode == "high":
+            initial_tension = oven_catenary_tension(
+                belt_linear,
+                values["first_span_in"],
+                values["desired_sag_in"],
+            )
+
+            loading_friction = (
+                values["loading_length_ft"]
+                * loaded_linear
+                * values["loading_mu"]
+            )
+            preheat_friction = (
+                values["preheat_length_ft"]
+                * loaded_linear
+                * values["preheat_mu"]
+            )
+            hot_friction = (
+                values["hot_length_ft"]
+                * loaded_linear
+                * values["hot_mu"]
+            )
+
+            effective_pull = (
+                loading_friction
+                + preheat_friction
+                + hot_friction
+            )
+            critical_tension = initial_tension + effective_pull
+            torque = effective_pull * radius_ft
+
+            return jsonify({
+                "mode": "high",
+                "unit_system": unit_system,
+                "required_torque": oven_torque(
+                    torque,
+                    unit_system,
+                ),
+                "effective_drive_pull": oven_force(
+                    effective_pull,
+                    unit_system,
+                ),
+                "main_tension": oven_force(
+                    critical_tension,
+                    unit_system,
+                ),
+                "details": {
+                    "initial_tension": {
+                        "label": "Initial first-span tension",
+                        "value": oven_per_width(
+                            initial_tension
+                            / values["belt_width_ft"],
+                            unit_system,
+                        ),
+                        "unit": per_width_unit,
+                    },
+                    "loading_friction": {
+                        "label": "Loading-zone friction",
+                        "value": oven_per_width(
+                            loading_friction
+                            / values["belt_width_ft"],
+                            unit_system,
+                        ),
+                        "unit": per_width_unit,
+                    },
+                    "preheat_friction": {
+                        "label": "Preheat-zone friction",
+                        "value": oven_per_width(
+                            preheat_friction
+                            / values["belt_width_ft"],
+                            unit_system,
+                        ),
+                        "unit": per_width_unit,
+                    },
+                    "hot_friction": {
+                        "label": "Hot-zone friction",
+                        "value": oven_per_width(
+                            hot_friction
+                            / values["belt_width_ft"],
+                            unit_system,
+                        ),
+                        "unit": per_width_unit,
+                    },
+                    "effective_pull_per_width": {
+                        "label": "Effective pull per belt width",
+                        "value": oven_per_width(
+                            effective_pull
+                            / values["belt_width_ft"],
+                            unit_system,
+                        ),
+                        "unit": per_width_unit,
+                    },
+                    "critical_tension_per_width": {
+                        "label": "Critical tension per belt width",
+                        "value": oven_per_width(
+                            critical_tension
+                            / values["belt_width_ft"],
+                            unit_system,
+                        ),
+                        "unit": per_width_unit,
+                    },
+                },
+            })
+
+        pulley_face = str(
+            data.get("pulley_face", "")
+        ).strip().lower()
+        wrap_angle = int(oven_number(data, "wrap_angle"))
+
+        if pulley_face not in OVEN_DRIVE_FACTORS:
+            raise ValueError(
+                "pulley_face must be metal or lagged"
+            )
+
+        if wrap_angle not in OVEN_DRIVE_FACTORS[pulley_face]:
+            raise ValueError("Unsupported wrap angle")
+
+        return_friction = (
+            values["conveyor_length_ft"]
+            * belt_linear
+            * values["return_mu"]
+        )
+        carrying_friction = (
+            values["conveyor_length_ft"]
+            * loaded_linear
+            * values["carry_mu"]
+        )
+        effective_pull = return_friction + carrying_friction
+
+        drive_factor = OVEN_DRIVE_FACTORS[
+            pulley_face
+        ][wrap_angle]
+        back_tension = drive_factor * effective_pull
+        minimum_drive_tension = effective_pull + back_tension
+        charge_end_tension = back_tension + return_friction
+
+        return_sag = oven_catenary_sag(
+            belt_linear,
+            values["return_spacing_in"],
+            back_tension,
+        )
+        loaded_sag = oven_catenary_sag(
+            loaded_linear,
+            values["carrying_spacing_in"],
+            charge_end_tension,
+        )
+
+        torque = effective_pull * radius_ft
+
+        return jsonify({
+            "mode": "low",
+            "unit_system": unit_system,
+            "required_torque": oven_torque(
+                torque,
+                unit_system,
+            ),
+            "effective_drive_pull": oven_force(
+                effective_pull,
+                unit_system,
+            ),
+            "main_tension": oven_force(
+                minimum_drive_tension,
+                unit_system,
+            ),
+            "back_tension": oven_force(
+                back_tension,
+                unit_system,
+            ),
+            "charge_end_tension": oven_force(
+                charge_end_tension,
+                unit_system,
+            ),
+            "return_sag": oven_sag(
+                return_sag,
+                unit_system,
+            ),
+            "loaded_sag": oven_sag(
+                loaded_sag,
+                unit_system,
+            ),
+            "drive_factor": drive_factor,
+            "details": {
+                "return_friction": {
+                    "label": "Return-run friction",
+                    "value": oven_per_width(
+                        return_friction
+                        / values["belt_width_ft"],
+                        unit_system,
+                    ),
+                    "unit": per_width_unit,
+                },
+                "carrying_friction": {
+                    "label": "Carrying-run friction",
+                    "value": oven_per_width(
+                        carrying_friction
+                        / values["belt_width_ft"],
+                        unit_system,
+                    ),
+                    "unit": per_width_unit,
+                },
+                "effective_pull_per_width": {
+                    "label": "Effective pull per belt width",
+                    "value": oven_per_width(
+                        effective_pull
+                        / values["belt_width_ft"],
+                        unit_system,
+                    ),
+                    "unit": per_width_unit,
+                },
+                "back_tension_per_width": {
+                    "label": "Back tension per belt width",
+                    "value": oven_per_width(
+                        back_tension
+                        / values["belt_width_ft"],
+                        unit_system,
+                    ),
+                    "unit": per_width_unit,
+                },
+                "drive_tension_per_width": {
+                    "label": "Drive tension per belt width",
+                    "value": oven_per_width(
+                        minimum_drive_tension
+                        / values["belt_width_ft"],
+                        unit_system,
+                    ),
+                    "unit": per_width_unit,
+                },
+                "drive_factor": {
+                    "label": "Pulley traction factor",
+                    "value": drive_factor,
+                    "unit": "",
+                },
+            },
+        })
+
+    except (TypeError, ValueError, KeyError) as ex:
+        return jsonify({"error": str(ex)}), 400
+
+    except Exception:
+        app.logger.exception(
+            "Oven and furnace belt tension calculation failed."
         )
         return jsonify({
             "error": "The server could not complete the calculation."
