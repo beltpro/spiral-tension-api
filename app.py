@@ -18,7 +18,7 @@ app = Flask(__name__)
 # ==========================================================
 
 CALCULATOR_STATUS = {
-    "spiral-tension": True,
+    "spiral-tension": False,
     "cycles": True,
     "cb5-air-pressure": True,
     "max-allowable-tension": True,
@@ -27,7 +27,7 @@ CALCULATOR_STATUS = {
     "belt-sprocket-conversion": True,
     "oven-band-force": True,
     "belt-turn-ratio": True,
-    "side-drive-sizing": True,
+    "side-drive-sizing": False,
     "spiral-drive-motor-sizing": True,
     "cage-chain-sizing": True,
     "oven-furnace-belt-tension": True,
