@@ -18,7 +18,7 @@ app = Flask(__name__)
 # ==========================================================
 
 CALCULATOR_STATUS = {
-    "spiral-tension": True,
+    "spiral-tension": False,
     "cycles": True,
     "cb5-air-pressure": True,
     "max-allowable-tension": True,
