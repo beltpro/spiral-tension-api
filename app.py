@@ -18,7 +18,7 @@ app = Flask(__name__)
 # JavaScript, or this source file.
 # ==========================================================
 
-CLIENT_ACCESS_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+CLIENT_ACCESS_MAX_AGE = 60 * 60 * 24  # 1 day
 
 
 def _client_access_code():
