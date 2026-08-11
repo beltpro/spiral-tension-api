@@ -5,8 +5,94 @@ import psycopg2
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+import hmac
 
 app = Flask(__name__)
+
+# ==========================================================
+# CLIENT ACCESS CONTROL
+#
+# Set BELTPRO_CLIENT_ACCESS_CODE in Render Environment.
+# The actual client code is never stored in the website HTML,
+# JavaScript, or this source file.
+# ==========================================================
+
+CLIENT_ACCESS_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+
+
+def _client_access_code():
+    return os.environ.get("BELTPRO_CLIENT_ACCESS_CODE", "")
+
+
+def _client_access_serializer():
+    access_code = _client_access_code()
+
+    if not access_code:
+        raise RuntimeError(
+            "BELTPRO_CLIENT_ACCESS_CODE environment variable is not configured."
+        )
+
+    # The signing secret is derived server-side from the environment value.
+    # This keeps issued access tokens tamper-resistant without exposing the
+    # client code in public frontend files.
+    return URLSafeTimedSerializer(
+        access_code + ":beltpro-client-access-v1",
+        salt="beltpro-client-access"
+    )
+
+
+@app.route("/client-access/validate", methods=["POST"])
+def validate_client_access():
+    expected_code = _client_access_code()
+
+    if not expected_code:
+        return jsonify({
+            "ok": False,
+            "error": "Client access is not configured on the server."
+        }), 503
+
+    data = request.get_json(silent=True) or {}
+    submitted_code = str(data.get("code", ""))
+
+    if not hmac.compare_digest(submitted_code, expected_code):
+        return jsonify({
+            "ok": False,
+            "error": "Invalid client access code."
+        }), 401
+
+    token = _client_access_serializer().dumps({
+        "access": "beltpro-client"
+    })
+
+    return jsonify({
+        "ok": True,
+        "token": token,
+        "expires_in": CLIENT_ACCESS_MAX_AGE
+    })
+
+
+@app.route("/client-access/check", methods=["POST"])
+def check_client_access():
+    data = request.get_json(silent=True) or {}
+    token = str(data.get("token", ""))
+
+    if not token:
+        return jsonify({"ok": False}), 401
+
+    try:
+        payload = _client_access_serializer().loads(
+            token,
+            max_age=CLIENT_ACCESS_MAX_AGE
+        )
+    except (BadSignature, SignatureExpired, RuntimeError):
+        return jsonify({"ok": False}), 401
+
+    if payload.get("access") != "beltpro-client":
+        return jsonify({"ok": False}), 401
+
+    return jsonify({"ok": True})
+
 
 # ==========================================================
 # CALCULATOR AVAILABILITY SWITCHES
@@ -203,6 +289,8 @@ CORS(app, resources={
     r"/spiral-drive-motor-sizing": {"origins": "https://www.beltpro.com.br"},
     r"/cage-chain-sizing": {"origins": "https://www.beltpro.com.br"},
     r"/oven-furnace-belt-tension": {"origins": "https://www.beltpro.com.br"},
+    r"/client-access/validate": {"origins": "https://www.beltpro.com.br"},
+    r"/client-access/check": {"origins": "https://www.beltpro.com.br"},
 })
 
 
