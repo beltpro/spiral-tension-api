@@ -289,8 +289,8 @@ CORS(app, resources={
     r"/spiral-drive-motor-sizing": {"origins": "https://www.beltpro.com.br"},
     r"/cage-chain-sizing": {"origins": "https://www.beltpro.com.br"},
     r"/oven-furnace-belt-tension": {"origins": "https://www.beltpro.com.br"},
-    r"/client-access/validate": {"origins": "https://www.beltpro.com.br"},
-    r"/client-access/check": {"origins": "https://www.beltpro.com.br"},
+    r"/client-access/validate": {"origins": ["https://www.beltpro.com.br", "https://beltpro.com.br"]},
+    r"/client-access/check": {"origins": ["https://www.beltpro.com.br", "https://beltpro.com.br"]},
 })
 
 
